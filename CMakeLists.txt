@@ -1,0 +1,104 @@
+cmake_minimum_required(VERSION 3.20)
+
+project(RealtimeRenderer LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+include(FetchContent)
+
+# ---------------- GLFW ----------------
+
+set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(
+    glfw
+    GIT_REPOSITORY https://github.com/glfw/glfw.git
+    GIT_TAG 3.4
+)
+
+FetchContent_MakeAvailable(glfw)
+
+# ---------------- GLAD ----------------
+
+FetchContent_Declare(
+    glad
+    GIT_REPOSITORY https://github.com/Dav1dde/glad.git
+    GIT_TAG v2.0.8
+    SOURCE_SUBDIR cmake
+)
+
+FetchContent_MakeAvailable(glad)
+
+glad_add_library(
+    glad_gl_core_33
+    STATIC
+    REPRODUCIBLE
+    API gl:core=3.3
+)
+
+# ---------------- GLM ----------------
+
+FetchContent_Declare(
+    glm
+    GIT_REPOSITORY https://github.com/g-truc/glm.git
+    GIT_TAG 1.0.1
+)
+
+FetchContent_MakeAvailable(glm)
+
+# ---------------- Assimp ----------------
+FetchContent_Declare(
+    assimp
+    GIT_REPOSITORY https://github.com/assimp/assimp.git
+    GIT_TAG v5.4.3
+)
+
+set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
+
+FetchContent_MakeAvailable(assimp)
+
+# ---------------- Renderer ----------------
+
+add_executable(
+    renderer
+    src/main.cpp
+    src/Shader.cpp
+    src/Texture.cpp
+    src/Camera.cpp
+    src/Material.cpp
+    src/Mesh.cpp
+    src/Model.cpp
+)
+
+target_include_directories(
+    renderer
+    PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/external/stb
+)
+
+target_link_libraries(
+    renderer
+    PRIVATE
+    glfw
+    glad_gl_core_33
+    glm::glm
+    assimp::assimp
+)
+
+add_custom_command(
+    TARGET renderer POST_BUILD
+
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_SOURCE_DIR}/shaders
+    $<TARGET_FILE_DIR:renderer>/shaders
+
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_SOURCE_DIR}/assets
+    $<TARGET_FILE_DIR:renderer>/assets
+)
