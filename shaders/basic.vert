@@ -9,16 +9,19 @@ layout(location = 4) in vec3 aBitangent;
 out vec2 TexCoord;
 out vec3 Normal;
 out vec3 FragPos;
+out vec4 FragPosLightSpace;
 out mat3 TBN;
 
 uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
+uniform mat4 lightSpaceMatrix;
 
 void main()
 {
     vec4 worldPos =
         model * vec4(aPos, 1.0);
+FragPosLightSpace = lightSpaceMatrix * worldPos;
 
     FragPos = worldPos.xyz;
     TexCoord = aTexCoord;

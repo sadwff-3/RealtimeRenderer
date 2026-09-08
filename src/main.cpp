@@ -4,6 +4,7 @@
 #include"Material.h"
 #include"Mesh.h"
 #include"Model.h"
+#include"Light.h"
 #include<glad/gl.h>
 #include<GLFW/glfw3.h>
 #include<glm/glm.hpp>
@@ -46,16 +47,6 @@ void scroll_callback(GLFWwindow* window,double xoffset,double yoffset)
 {
     camera.processMouseScroll(static_cast<float>(yoffset));
 }
-
-struct Light {
-    glm::vec3 position;
-    glm::vec3 color;
-    float intensity;
-
-    float constant;
-    float linear;
-    float quadratic;
-};
 
 int main()
 {
@@ -104,6 +95,7 @@ int main()
     //shader•’•°•§•Î§Ú’i§ﬂﬁz§‡
     {
         Shader shader("shaders/basic.vert", "shaders/basic.frag");
+        Shader shadowShader("shaders/shadow_depth.vert", "shaders/shadow_depth.frag");
         Texture texture("assets/texture.jpg");
         Texture normalTexture("assets/normal.jpg");
         Model testModel("assets/sponza/sponza.obj");
@@ -173,8 +165,38 @@ int main()
 
         shader.use();
         shader.setInt("texture1", 0);
+        shader.setInt("shadowMap", 2);
 
         glEnable(GL_DEPTH_TEST);
+        //shadow map create
+        const unsigned int SHADOW_WIDTH = 2048;
+        const unsigned int SHADOW_HEIGHT = 2048;
+       
+        unsigned int depthMapFBO;
+        glGenFramebuffers(1, &depthMapFBO);
+
+        unsigned int depthMap; 
+        glGenTextures(1, &depthMap);
+        glBindTexture(GL_TEXTURE_2D, depthMap);
+
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+
+        float borderColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+        glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthMap, 0);
+
+        glDrawBuffer(GL_NONE);
+        glReadBuffer(GL_NONE);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
         float deltaTime = 0.0f;
         float lastFrame = 0.0f;
@@ -191,7 +213,16 @@ int main()
         Material woodMaterial(&texture, &normalTexture, 0.2f, 0.3f, 16.0f);
         Material shinyMaterial(&texture, &normalTexture, 0.1f, 1.0f, 128.0f);
         //Lights
-        Light lights[2];
+        PointLight lights[2];
+        DirectionalLight directionalLight;
+
+        glm::vec3 lightPos = -directionalLight.direction * 20.0f;
+
+
+        directionalLight.direction = glm::vec3(-0.2f, -0.1f, -0.3f);
+        directionalLight.color = glm::vec3(1.0f);
+        directionalLight.intensity = 0.8f;
+
         lights[0].position = glm::vec3(1.2f, 1.0f, 2.0f);
         lights[0].color = glm::vec3(1.0f, 1.0f, 1.0f);
         lights[0].intensity = 1.0f;
@@ -242,28 +273,51 @@ int main()
                 camera.processKeyboard(CameraMovement::Right, deltaTime);
             }
 
+            //shadow mapping
+            glm::mat4 lightProjection = glm::ortho(-15.0f, 15.0f, -15.0f, 15.0f, 0.1f, 50.0f);
+            glm::mat4 lightView = glm::lookAt(lightPos, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+            glm::mat4 lightSpaceMatrix = lightProjection * lightView;
+            glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
+            glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
+            glClear(GL_DEPTH_BUFFER_BIT);
+            
+            
+            shadowShader.use();
+            shadowShader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
+            
+            glActiveTexture(GL_TEXTURE2);
+            glBindTexture(GL_TEXTURE_2D, depthMap);
+
+            glm::mat4 shadowModel = glm::mat4(1.0f);
+            shadowModel = glm::scale(shadowModel, glm::vec3(0.01f));
+
+            shadowShader.setMat4("model", shadowModel);
+            testModel.draw(shadowShader);
+            
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glViewport(0, 0, 1280, 720);
+
             glClearColor(0.1f, 0.2f, 0.3f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
             shader.use();
 
+            shader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
 
             glm::mat4 model = glm::mat4(1.0f);
             model = glm::scale(model, glm::vec3(0.01f));
 
-            model = glm::translate(
-                model,
-                glm::vec3(0.0f, 0.0f, 0.0f)
-            );
+            model = glm::translate(model, glm::vec3(0.0f, 0.0f, 0.0f));
 
             shader.setMat4("model", model);
 
-            
 
-            testModel.draw(shader);
+            //DirectionalLightPos
+            shader.setVec3("directionalLight.direction", directionalLight.direction);
+            shader.setVec3("directionalLight.color", directionalLight.color);
+            shader.setFloat("directionalLight.intensity", directionalLight.intensity);
 
-
-            //lightPos
+            //PointlightPos
             shader.setInt("pointLightCount", 2);
             for (int i = 0; i < 2; ++i)
             {
@@ -289,6 +343,8 @@ int main()
 
             shader.setMat4("view", view);
             shader.setMat4("projection", projection);
+
+            testModel.draw(shader);
 
             for (int i = 0; i < 5; ++i)
             {
