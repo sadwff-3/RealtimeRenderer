@@ -96,6 +96,7 @@ int main()
     {
         Shader shader("shaders/basic.vert", "shaders/basic.frag");
         Shader shadowShader("shaders/shadow_depth.vert", "shaders/shadow_depth.frag");
+        Shader shadowDebugShader("shaders/shadow_debug.vert", "shaders/shadow_debug.frag");
         Texture texture("assets/texture.jpg");
         Texture normalTexture("assets/normal.jpg");
         Model testModel("assets/sponza/sponza.obj");
@@ -163,9 +164,33 @@ int main()
 
         Mesh cubeMesh(cubeVertices, cubeIndices);
 
+
+        //debug
+        std::vector<Vertex> debugQuadVertices =
+        {
+            {{-1.0f, -1.0f, 0.0f}, {0,0,1}, {0.0f, 0.0f}},
+            {{ 1.0f, -1.0f, 0.0f}, {0,0,1}, {1.0f, 0.0f}},
+            {{ 1.0f,  1.0f, 0.0f}, {0,0,1}, {1.0f, 1.0f}},
+            {{-1.0f,  1.0f, 0.0f}, {0,0,1}, {0.0f, 1.0f}}
+        };
+
+        std::vector<unsigned int> debugQuadIndices =
+        {
+            0, 1, 2,
+            2, 3, 0
+        };
+
+        Mesh debugQuad(debugQuadVertices, debugQuadIndices);
+
+
         shader.use();
         shader.setInt("texture1", 0);
         shader.setInt("shadowMap", 2);
+
+
+        shadowDebugShader.use();
+        shadowDebugShader.setInt("depthMap", 0);
+
 
         glEnable(GL_DEPTH_TEST);
         //shadow map create
@@ -367,6 +392,21 @@ int main()
                 }
 
                 cubeMesh.draw();
+            }
+
+
+            if (glfwGetKey(window, GLFW_KEY_B) == GLFW_PRESS)
+            {
+                glDisable(GL_DEPTH_TEST);
+
+                shadowDebugShader.use();
+
+                glActiveTexture(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_2D, depthMap);
+
+                debugQuad.draw();
+
+                glEnable(GL_DEPTH_TEST);
             }
 
 

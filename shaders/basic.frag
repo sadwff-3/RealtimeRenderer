@@ -42,15 +42,37 @@ uniform float ambientStrength;
 uniform float specularStrength;
 uniform float shininess;
 
-float calculateShadow(vec4 fragPosLightSpace)
+float calculateShadow(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir)
 {
     vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
     projCoords = projCoords * 0.5 + 0.5;
 
-    float closestDepth = texture(shadowMap, projCoords.xy).r;
+    if (projCoords.z > 1.0)
+{
+    return 0.0;
+}
+
     float currentDepth = projCoords.z;
-    float bias = 0.005;
-    float shadow = currentDepth - bias  > closestDepth ? 1.0 : 0.0;
+    float bias = max(0.005 * (1.0 - dot(normal, lightDir)), 0.0005);
+
+    vec2 texelSize = 1.0 / textureSize(shadowMap,0);
+    
+    float shadow = 0.0;
+
+    for(int x = -1;x <=1; ++x)
+    {
+        for(int y = -1;y <= 1;++y)
+        {
+            float closestDepth = texture(shadowMap,projCoords.xy + vec2(x,y) * texelSize).r;
+
+            if(currentDepth  - bias > closestDepth)
+            {
+                shadow += 1.0;
+            }
+        }
+    }
+
+    shadow /= 9.0;
 
     return shadow;
 }
@@ -88,7 +110,7 @@ vec3 dirSpecular = specularStrength
     * directionalLight.color
     * directionalLight.intensity;
 
-float shadow = calculateShadow(FragPosLightSpace);
+float shadow = calculateShadow(FragPosLightSpace, normalize(Normal), dirLightDir);
 lighting += (1.0 - shadow) * (dirDiffuse + dirSpecular);
 
     for (int i = 0; i < pointLightCount; ++i)
