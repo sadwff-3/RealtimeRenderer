@@ -94,7 +94,7 @@ int main()
     
     //shader•’•°•§•Î§Ú’i§ﬂﬁz§‡
     {
-        Shader shader("shaders/basic.vert", "shaders/basic.frag");
+        Shader shader("shaders/pbr.vert", "shaders/pbr.frag");
         Shader shadowShader("shaders/shadow_depth.vert", "shaders/shadow_depth.frag");
         Shader shadowDebugShader("shaders/shadow_debug.vert", "shaders/shadow_debug.frag");
         Texture texture("assets/texture.jpg");
@@ -241,12 +241,14 @@ int main()
         PointLight lights[2];
         DirectionalLight directionalLight;
 
-        glm::vec3 lightPos = -directionalLight.direction * 20.0f;
+       
 
 
         directionalLight.direction = glm::vec3(-0.2f, -0.1f, -0.3f);
         directionalLight.color = glm::vec3(1.0f);
         directionalLight.intensity = 0.8f;
+
+        glm::vec3 lightPos = -directionalLight.direction * 20.0f;
 
         lights[0].position = glm::vec3(1.2f, 1.0f, 2.0f);
         lights[0].color = glm::vec3(1.0f, 1.0f, 1.0f);
@@ -341,6 +343,11 @@ int main()
             shader.setVec3("directionalLight.direction", directionalLight.direction);
             shader.setVec3("directionalLight.color", directionalLight.color);
             shader.setFloat("directionalLight.intensity", directionalLight.intensity);
+
+            //pbrLight
+            shader.setFloat("metallic", 0.0f);
+            shader.setFloat("roughness", 0.5f);
+            shader.setFloat("ao", 1.0f);
 
             //PointlightPos
             shader.setInt("pointLightCount", 2);
