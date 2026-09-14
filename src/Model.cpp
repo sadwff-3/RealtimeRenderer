@@ -64,7 +64,7 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
 			material->GetTexture(aiTextureType_DIFFUSE, 0, &texturePath);
 
 			std::string fullPath = directory + "/" + texturePath.C_Str();
-			diffuseTexture = loadTexture(fullPath);
+			diffuseTexture = loadTexture(fullPath, true);
 		}
 
 		unsigned int normalCount = material->GetTextureCount(aiTextureType_NORMALS);
@@ -76,7 +76,7 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
 			material->GetTexture(aiTextureType_NORMALS, 0, &normalPath);
 
 			std::string fullNormalPath = directory + "/" + normalPath.C_Str();
-			normalTexture = loadTexture(fullNormalPath);
+			normalTexture = loadTexture(fullNormalPath, false);
 		}
 		else if (heightCount > 0)
 		{
@@ -84,7 +84,7 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
 			material->GetTexture(aiTextureType_HEIGHT, 0, &normalPath);
 
 			std::string fullNormalPath = directory + "/" + normalPath.C_Str();
-			normalTexture = loadTexture(fullNormalPath);
+			normalTexture = loadTexture(fullNormalPath, false);
 		}
 	
 	}
@@ -136,19 +136,21 @@ void Model::draw(Shader& shader) const
 	}
 }
 
-Texture* Model::loadTexture(const std::string& path)
+Texture* Model::loadTexture(const std::string& path, bool srgb)
 {
-	auto it = loadedTextures.find(path);
+	std::string cacheKey = path + (srgb ? "_srgb" : "_linear");
+
+	auto it = loadedTextures.find(cacheKey);
 
 	if (it != loadedTextures.end())
 	{
 		return it->second.get();
 	}
 
-	auto texture = std::make_unique<Texture>(path.c_str());
+	auto texture = std::make_unique<Texture>(path.c_str(), srgb);
 	Texture* texturePtr = texture.get();
 
-	loadedTextures.emplace(path, std::move(texture));
+	loadedTextures.emplace(cacheKey, std::move(texture));
 
 	return texturePtr;
 }

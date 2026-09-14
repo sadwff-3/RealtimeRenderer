@@ -7,7 +7,7 @@
 
 #include<iostream>
 
-Texture::Texture(const char* path)
+Texture::Texture(const char* path, bool srgb)
 {
 	glGenTextures(1, &ID);
 	glBindTexture(GL_TEXTURE_2D, ID);
@@ -28,23 +28,28 @@ Texture::Texture(const char* path)
     unsigned char* data = stbi_load(path, &width, &height, &channels, 0);
     if (data)
     {
-        GLenum format;
+        GLenum dataFormat;
+        GLenum internalFormat;
 
         if (channels == 1)
         {
-            format = GL_RED;
+            dataFormat = GL_RED;
+            internalFormat = GL_RED;
         }
         else if (channels == 2)
         {
-            format = GL_RG;
+            dataFormat = GL_RG;
+            internalFormat = GL_RG;
         }
         else if (channels == 3)
         {
-            format = GL_RGB;
+            dataFormat = GL_RGB;
+            internalFormat = srgb ? GL_SRGB : GL_RGB;
         }
         else if (channels == 4)
         {
-            format = GL_RGBA;
+            dataFormat = GL_RGBA;
+            internalFormat = srgb ? GL_SRGB_ALPHA : GL_RGBA;
         }
         else
         {
@@ -55,7 +60,7 @@ Texture::Texture(const char* path)
 
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
-        glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+        glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0, dataFormat, GL_UNSIGNED_BYTE, data);
         glGenerateMipmap(GL_TEXTURE_2D);
 
         std::cout << "Texture loaded: " << path << " (" << width << "x" << height << ", channels=" << channels << ")\n";

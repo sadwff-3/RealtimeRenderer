@@ -3,7 +3,7 @@
 class Texture
 {
 public:
-    Texture(const char* path);
+    Texture(const char* path, bool srgb = false);
     Texture(unsigned char r, unsigned char g, unsigned char b);
 
     ~Texture();

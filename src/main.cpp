@@ -95,10 +95,11 @@ int main()
     //shader•’•°•§•Î§Ú’i§ﬂﬁz§‡
     {
         Shader shader("shaders/pbr.vert", "shaders/pbr.frag");
+        Shader screenShader("shaders/screen.vert", "shaders/screen.frag");
         Shader shadowShader("shaders/shadow_depth.vert", "shaders/shadow_depth.frag");
         Shader shadowDebugShader("shaders/shadow_debug.vert", "shaders/shadow_debug.frag");
-        Texture texture("assets/texture.jpg");
-        Texture normalTexture("assets/normal.jpg");
+        Texture texture("assets/texture.jpg", true);
+        Texture normalTexture("assets/normal.jpg", false);
         Model testModel("assets/sponza/sponza.obj");
 
 
@@ -190,9 +191,48 @@ int main()
 
         shadowDebugShader.use();
         shadowDebugShader.setInt("depthMap", 0);
+        screenShader.use();
+        screenShader.setInt("screenTexture", 0);
+        screenShader.setFloat("exposure", 1.0f);
 
 
         glEnable(GL_DEPTH_TEST);
+
+
+        //scene frame buffer
+        const unsigned int SCREEN_WIDTH = 1280;
+        const unsigned int SCREEN_HEIGHT = 720;
+
+        unsigned int sceneFBO;
+        glGenFramebuffers(1, &sceneFBO);
+        glBindFramebuffer(GL_FRAMEBUFFER , sceneFBO);
+
+        //color attchment
+        unsigned int sceneColorTexture;
+        glGenTextures(1, &sceneColorTexture);
+        glBindTexture(GL_TEXTURE_2D, sceneColorTexture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, SCREEN_WIDTH, SCREEN_HEIGHT, 0, GL_RGB, GL_FLOAT, nullptr);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sceneColorTexture, 0);
+
+        //Depth
+        unsigned int sceneRBO;
+        glGenRenderbuffers(1, &sceneRBO);
+        glBindRenderbuffer(GL_RENDERBUFFER, sceneRBO);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, sceneRBO);
+
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        {
+            std::cerr << "Scene framebuffer is not complete!\n";
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+
         //shadow map create
         const unsigned int SHADOW_WIDTH = 2048;
         const unsigned int SHADOW_HEIGHT = 2048;
@@ -252,7 +292,7 @@ int main()
 
         lights[0].position = glm::vec3(1.2f, 1.0f, 2.0f);
         lights[0].color = glm::vec3(1.0f, 1.0f, 1.0f);
-        lights[0].intensity = 1.0f;
+        lights[0].intensity = 5.0f;
 
         lights[0].constant = 1.0f;
         lights[0].linear = 0.09f;
@@ -321,8 +361,8 @@ int main()
             shadowShader.setMat4("model", shadowModel);
             testModel.draw(shadowShader);
             
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
-            glViewport(0, 0, 1280, 720);
+            glBindFramebuffer(GL_FRAMEBUFFER, sceneFBO);
+            glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
 
             glClearColor(0.1f, 0.2f, 0.3f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -401,6 +441,22 @@ int main()
                 cubeMesh.draw();
             }
 
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+            glDisable(GL_DEPTH_TEST);
+
+            glClearColor(0.1f, 0.2f, 0.3f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
+
+            screenShader.use();
+
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, sceneColorTexture);
+
+            debugQuad.draw();
+
+            glEnable(GL_DEPTH_TEST);
 
             if (glfwGetKey(window, GLFW_KEY_B) == GLFW_PRESS)
             {

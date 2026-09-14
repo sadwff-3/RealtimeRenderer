@@ -37,8 +37,7 @@ uniform DirectionalLight directionalLight;
 
 uniform vec3 viewPos;
 
-//  ambient 和 point light 还在使用
-uniform float ambientStrength;
+
 
 
 // PBR 参数
@@ -141,8 +140,8 @@ void main()
     vec3 F0 = vec3(0.04);
     F0 = mix(F0, albedo, metallic);
 
-    // Ambient 暂时保留旧版本
-    vec3 ambient = ambientStrength * textureColor;
+    // Ambient pbr
+    vec3 ambient = vec3(0.03) * albedo * ao;
     vec3 lighting = ambient;
 
     // =========================================================

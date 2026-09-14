@@ -33,5 +33,5 @@ private:
     void processNode(aiNode* node, const aiScene* scene);
     Mesh processMesh(aiMesh* mesh, const aiScene* scene);
 
-    Texture* loadTexture(const std::string& path);
+    Texture* loadTexture(const std::string& path, bool srgb);
 };
