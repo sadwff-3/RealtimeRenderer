@@ -9,6 +9,9 @@ Model::Model(const std::string& path)
 {
 	defaultDiffuse = std::make_unique<Texture>(255, 255, 255);
 	defaultNormal = std::make_unique<Texture>(128, 128, 255);
+	defaultMetallic = std::make_unique<Texture>(0, 0, 0);
+	defaultRoughness = std::make_unique<Texture>(128, 128, 128);
+	defaultAO = std::make_unique<Texture>(255, 255, 255);
 	loadModel(path);
 }
 
@@ -51,6 +54,9 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
 
 	Texture* diffuseTexture = defaultDiffuse.get();
 	Texture* normalTexture = defaultNormal.get();
+	Texture* metallicTexture = defaultMetallic.get();
+	Texture* roughnessTexture = defaultRoughness.get();
+	Texture* aoTexture = defaultAO.get();
 
 	if (mesh->mMaterialIndex < scene->mNumMaterials)
 	{
@@ -85,6 +91,39 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
 
 			std::string fullNormalPath = directory + "/" + normalPath.C_Str();
 			normalTexture = loadTexture(fullNormalPath, false);
+		}
+
+		unsigned int metallicCount = material->GetTextureCount(aiTextureType_METALNESS);
+
+		if (metallicCount > 0)
+		{
+			aiString metallicPath;
+			material->GetTexture(aiTextureType_METALNESS, 0, &metallicPath);
+
+			std::string fullMetallicPath = directory + "/" + metallicPath.C_Str();
+			metallicTexture = loadTexture(fullMetallicPath, false);
+		}
+
+		unsigned int roughnessCount = material->GetTextureCount(aiTextureType_DIFFUSE_ROUGHNESS);
+
+		if (roughnessCount > 0)
+		{
+			aiString roughnessPath;
+			material->GetTexture(aiTextureType_DIFFUSE_ROUGHNESS, 0, &roughnessPath);
+
+			std::string fullRoughnessPath = directory + "/" + roughnessPath.C_Str();
+			roughnessTexture = loadTexture(fullRoughnessPath, false);
+		}
+
+		unsigned int aoCount = material->GetTextureCount(aiTextureType_AMBIENT_OCCLUSION);
+
+		if (aoCount > 0)
+		{
+			aiString aoPath;
+			material->GetTexture(aiTextureType_AMBIENT_OCCLUSION, 0, &aoPath);
+
+			std::string fullAOPath = directory + "/" + aoPath.C_Str();
+			aoTexture = loadTexture(fullAOPath, false);
 		}
 	
 	}
@@ -121,7 +160,7 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
 		}
 	}
 
-	meshMaterials.emplace_back(diffuseTexture, normalTexture, 0.2f, 0.3f, 32.0f);
+	meshMaterials.emplace_back(diffuseTexture, normalTexture, metallicTexture, roughnessTexture, aoTexture);
 
 	return Mesh(vertices, indices);
 }

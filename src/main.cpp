@@ -185,7 +185,7 @@ int main()
 
 
         shader.use();
-        shader.setInt("texture1", 0);
+        
         shader.setInt("shadowMap", 2);
 
 
@@ -275,8 +275,11 @@ int main()
         };
 
         //Material
-        Material woodMaterial(&texture, &normalTexture, 0.2f, 0.3f, 16.0f);
-        Material shinyMaterial(&texture, &normalTexture, 0.1f, 1.0f, 128.0f);
+        Texture testMetallic(0, 0, 0);
+        Texture testRoughness(128, 128, 128);
+        Texture testAO(255, 255, 255);
+        Material woodMaterial(&texture, &normalTexture, &testMetallic, &testRoughness, &testAO);
+        Material shinyMaterial(&texture, &normalTexture, &testMetallic, &testRoughness, &testAO);
         //Lights
         PointLight lights[2];
         DirectionalLight directionalLight;
@@ -292,7 +295,7 @@ int main()
 
         lights[0].position = glm::vec3(1.2f, 1.0f, 2.0f);
         lights[0].color = glm::vec3(1.0f, 1.0f, 1.0f);
-        lights[0].intensity = 5.0f;
+        lights[0].intensity = 1.0f;
 
         lights[0].constant = 1.0f;
         lights[0].linear = 0.09f;
@@ -383,11 +386,6 @@ int main()
             shader.setVec3("directionalLight.direction", directionalLight.direction);
             shader.setVec3("directionalLight.color", directionalLight.color);
             shader.setFloat("directionalLight.intensity", directionalLight.intensity);
-
-            //pbrLight
-            shader.setFloat("metallic", 0.0f);
-            shader.setFloat("roughness", 0.5f);
-            shader.setFloat("ao", 1.0f);
 
             //PointlightPos
             shader.setInt("pointLightCount", 2);

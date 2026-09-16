@@ -8,6 +8,9 @@ class Material
 public:
     Texture* albedo;
     Texture* normalMap;
+    Texture* metallicMap;
+    Texture* roughnessMap;
+    Texture* aoMap;
 
     float ambientStrength;
     float specularStrength;
@@ -16,9 +19,9 @@ public:
     Material(
         Texture* albedoTexture,
         Texture* normalTexture,
-        float ambient = 0.2f,
-        float specular = 0.3f,
-        float shine = 16.0f
+        Texture* metallicMap,
+        Texture* roughnessMap,
+        Texture* aoMap
     );
 
     void bind(Shader& shader) const;

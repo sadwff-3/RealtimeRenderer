@@ -1,7 +1,7 @@
 #include"Material.h"
 #include<glad/gl.h>
 
-Material::Material(Texture* albedoTexture, Texture* normalTexture, float ambient, float specular, float shine) :albedo(albedoTexture), normalMap(normalTexture), ambientStrength(ambient), specularStrength(specular), shininess(shine)
+Material::Material(Texture* albedoTexture, Texture* normalTexture, Texture* matallicTexture, Texture* roughnessTexture, Texture* aoTexture) :albedo(albedoTexture), normalMap(normalTexture), metallicMap(matallicTexture), roughnessMap(roughnessTexture), aoMap(aoTexture)
 {
 
 }
@@ -10,14 +10,20 @@ void Material::bind(Shader& shader) const
 {
 	shader.use();
 
-	shader.setInt("texture1", 0);
+	shader.setInt("albedoMap", 0);
 	shader.setInt("normalMap", 1);
-	shader.setFloat("ambientStrength", ambientStrength);
-    shader.setFloat("specularStrength",specularStrength);
-    shader.setFloat("shininess",shininess);
+	shader.setInt("metallicMap", 3);
+	shader.setInt("roughnessMap", 4);
+	shader.setInt("aoMap", 5);
 
 	glActiveTexture(GL_TEXTURE0);
 	albedo->bind();
 	glActiveTexture(GL_TEXTURE1);
 	normalMap->bind();
+	glActiveTexture(GL_TEXTURE3);
+	metallicMap->bind();
+	glActiveTexture(GL_TEXTURE4);
+	roughnessMap->bind();
+	glActiveTexture(GL_TEXTURE5);
+	aoMap->bind();
 }

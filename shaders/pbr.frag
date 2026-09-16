@@ -8,9 +8,12 @@ in mat3 TBN;
 
 out vec4 FragColor;
 
-uniform sampler2D texture1;
+uniform sampler2D albedoMap;
 uniform sampler2D normalMap;
 uniform sampler2D shadowMap;
+uniform sampler2D metallicMap;
+uniform sampler2D roughnessMap;
+uniform sampler2D aoMap;
 
 struct PointLight
 {
@@ -37,13 +40,6 @@ uniform DirectionalLight directionalLight;
 
 uniform vec3 viewPos;
 
-
-
-
-// PBR 参数
-uniform float metallic;
-uniform float roughness;
-uniform float ao;
 
 const float PI = 3.14159265359;
 
@@ -127,8 +123,10 @@ float geometrySmith(vec3 N, vec3 V, vec3 L, float roughness)
 
 void main()
 {
-    vec3 textureColor = texture(texture1, TexCoord).rgb;
-    vec3 albedo = textureColor;
+    vec3 albedo = texture(albedoMap, TexCoord).rgb;
+    float metallic = texture(metallicMap, TexCoord).r;
+    float roughness = texture(roughnessMap, TexCoord).r;
+    float ao = texture(aoMap, TexCoord).r;
 
     vec3 tangentNormal = texture(normalMap, TexCoord).rgb;
     tangentNormal = tangentNormal * 2.0 - 1.0;

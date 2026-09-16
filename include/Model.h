@@ -28,6 +28,9 @@ private:
     std::unordered_map<std::string, std::unique_ptr<Texture>> loadedTextures;
     std::unique_ptr<Texture> defaultNormal;
     std::unique_ptr<Texture> defaultDiffuse;
+    std::unique_ptr<Texture> defaultMetallic;
+    std::unique_ptr<Texture> defaultRoughness;
+    std::unique_ptr<Texture> defaultAO;
 
     void loadModel(const std::string& path);
     void processNode(aiNode* node, const aiScene* scene);
