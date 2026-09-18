@@ -124,8 +124,8 @@ float geometrySmith(vec3 N, vec3 V, vec3 L, float roughness)
 void main()
 {
     vec3 albedo = texture(albedoMap, TexCoord).rgb;
-    float metallic = texture(metallicMap, TexCoord).r;
-    float roughness = texture(roughnessMap, TexCoord).r;
+    float metallic = texture(metallicMap, TexCoord).b;
+    float roughness = texture(roughnessMap, TexCoord).g;
     float ao = texture(aoMap, TexCoord).r;
 
     vec3 tangentNormal = texture(normalMap, TexCoord).rgb;

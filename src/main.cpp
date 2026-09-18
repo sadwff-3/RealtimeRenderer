@@ -5,6 +5,7 @@
 #include"Mesh.h"
 #include"Model.h"
 #include"Light.h"
+#include"Transform.h"
 #include<glad/gl.h>
 #include<GLFW/glfw3.h>
 #include<glm/glm.hpp>
@@ -19,6 +20,11 @@ Camera camera;
 float lastX = 640.0f;
 float lastY = 360.0f;
 bool firstMouse = true;
+
+//framebuffer size
+int framebufferWidth = 1280;
+int framebufferHeight = 720;
+bool framebufferResized = false;
 
 void mouse_callback(GLFWwindow* window, double xpos, double ypos)
 {
@@ -40,6 +46,9 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 {
+    framebufferWidth = width;
+    framebufferHeight = height;
+    framebufferResized = true;
     glViewport(0, 0, width, height);
 }
 
@@ -85,7 +94,8 @@ int main()
         << '\n';
 
     //Windowをつくる
-    glViewport(0, 0, 1280, 720);
+    glfwGetFramebufferSize(window, &framebufferWidth, &framebufferHeight);
+    glViewport(0, 0, framebufferWidth, framebufferHeight);
     
     glfwSetFramebufferSizeCallback(window,framebuffer_size_callback);
     glfwSetCursorPosCallback(window,mouse_callback);
@@ -98,73 +108,11 @@ int main()
         Shader screenShader("shaders/screen.vert", "shaders/screen.frag");
         Shader shadowShader("shaders/shadow_depth.vert", "shaders/shadow_depth.frag");
         Shader shadowDebugShader("shaders/shadow_debug.vert", "shaders/shadow_debug.frag");
-        Texture texture("assets/texture.jpg", true);
-        Texture normalTexture("assets/normal.jpg", false);
-        Model testModel("assets/sponza/sponza.obj");
+       
+        Model testModel("assets/sponza_pbr/Sponza.gltf");
 
-
-        std::vector<Vertex> cubeVertices =
-        {
-            // back (-Z)
-            {{-0.5f,-0.5f,-0.5f}, {0,0,-1}, {0,0}},
-            {{ 0.5f,-0.5f,-0.5f}, {0,0,-1}, {1,0}},
-            {{ 0.5f, 0.5f,-0.5f}, {0,0,-1}, {1,1}},
-            {{-0.5f, 0.5f,-0.5f}, {0,0,-1}, {0,1}},
-
-            // front (+Z)
-            {{-0.5f,-0.5f, 0.5f}, {0,0,1}, {0,0}},
-            {{ 0.5f,-0.5f, 0.5f}, {0,0,1}, {1,0}},
-            {{ 0.5f, 0.5f, 0.5f}, {0,0,1}, {1,1}},
-            {{-0.5f, 0.5f, 0.5f}, {0,0,1}, {0,1}},
-
-            // left (-X)
-            {{-0.5f, 0.5f, 0.5f}, {-1,0,0}, {1,0}},
-            {{-0.5f, 0.5f,-0.5f}, {-1,0,0}, {1,1}},
-            {{-0.5f,-0.5f,-0.5f}, {-1,0,0}, {0,1}},
-            {{-0.5f,-0.5f, 0.5f}, {-1,0,0}, {0,0}},
-
-            // right (+X)
-            {{ 0.5f, 0.5f, 0.5f}, {1,0,0}, {1,0}},
-            {{ 0.5f, 0.5f,-0.5f}, {1,0,0}, {1,1}},
-            {{ 0.5f,-0.5f,-0.5f}, {1,0,0}, {0,1}},
-            {{ 0.5f,-0.5f, 0.5f}, {1,0,0}, {0,0}},
-
-            // bottom (-Y)
-            {{-0.5f,-0.5f,-0.5f}, {0,-1,0}, {0,1}},
-            {{ 0.5f,-0.5f,-0.5f}, {0,-1,0}, {1,1}},
-            {{ 0.5f,-0.5f, 0.5f}, {0,-1,0}, {1,0}},
-            {{-0.5f,-0.5f, 0.5f}, {0,-1,0}, {0,0}},
-
-            // top (+Y)
-            {{-0.5f, 0.5f,-0.5f}, {0,1,0}, {0,1}},
-            {{ 0.5f, 0.5f,-0.5f}, {0,1,0}, {1,1}},
-            {{ 0.5f, 0.5f, 0.5f}, {0,1,0}, {1,0}},
-            {{-0.5f, 0.5f, 0.5f}, {0,1,0}, {0,0}}
-        };
-
-        std::vector<unsigned int> cubeIndices =
-        {
-             0,  1,  2,
-             2,  3,  0,
-
-             4,  5,  6,
-             6,  7,  4,
-
-             8,  9, 10,
-            10, 11,  8,
-
-            12, 13, 14,
-            14, 15, 12,
-
-            16, 17, 18,
-            18, 19, 16,
-
-            20, 21, 22,
-            22, 23, 20
-        };
-
-        Mesh cubeMesh(cubeVertices, cubeIndices);
-
+        Transform testTransform;
+        
 
         //debug
         std::vector<Vertex> debugQuadVertices =
@@ -198,11 +146,6 @@ int main()
 
         glEnable(GL_DEPTH_TEST);
 
-
-        //scene frame buffer
-        const unsigned int SCREEN_WIDTH = 1280;
-        const unsigned int SCREEN_HEIGHT = 720;
-
         unsigned int sceneFBO;
         glGenFramebuffers(1, &sceneFBO);
         glBindFramebuffer(GL_FRAMEBUFFER , sceneFBO);
@@ -211,7 +154,7 @@ int main()
         unsigned int sceneColorTexture;
         glGenTextures(1, &sceneColorTexture);
         glBindTexture(GL_TEXTURE_2D, sceneColorTexture);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, SCREEN_WIDTH, SCREEN_HEIGHT, 0, GL_RGB, GL_FLOAT, nullptr);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, framebufferWidth, framebufferHeight, 0, GL_RGB, GL_FLOAT, nullptr);
 
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -222,7 +165,7 @@ int main()
         unsigned int sceneRBO;
         glGenRenderbuffers(1, &sceneRBO);
         glBindRenderbuffer(GL_RENDERBUFFER, sceneRBO);
-        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, SCREEN_WIDTH, SCREEN_HEIGHT);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, framebufferWidth, framebufferHeight);
 
         glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, sceneRBO);
 
@@ -265,21 +208,8 @@ int main()
 
         float deltaTime = 0.0f;
         float lastFrame = 0.0f;
-
-        glm::vec3 cubePositions[] = {
-        glm::vec3(0.0f,  0.0f,  0.0f),
-        glm::vec3(2.0f,  0.0f, -3.0f),
-        glm::vec3(-1.5f,  1.0f, -2.5f),
-        glm::vec3(1.0f, -1.0f, -4.0f),
-        glm::vec3(-2.0f,  0.5f, -5.0f)
-        };
-
-        //Material
-        Texture testMetallic(0, 0, 0);
-        Texture testRoughness(128, 128, 128);
-        Texture testAO(255, 255, 255);
-        Material woodMaterial(&texture, &normalTexture, &testMetallic, &testRoughness, &testAO);
-        Material shinyMaterial(&texture, &normalTexture, &testMetallic, &testRoughness, &testAO);
+        int toneMappingMode = 1;
+        
         //Lights
         PointLight lights[2];
         DirectionalLight directionalLight;
@@ -343,6 +273,36 @@ int main()
                 camera.processKeyboard(CameraMovement::Right, deltaTime);
             }
 
+            if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS)
+            {
+                toneMappingMode = 0;
+            }
+
+            if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS)
+            {
+                toneMappingMode = 1;
+            }
+
+            if (framebufferWidth == 0 || framebufferHeight == 0)
+            {
+                glfwPollEvents();
+                continue;
+            }
+
+            if (framebufferResized)
+            {
+                glBindTexture(GL_TEXTURE_2D, sceneColorTexture);
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, framebufferWidth, framebufferHeight, 0, GL_RGB, GL_FLOAT, nullptr);
+
+                glBindRenderbuffer(GL_RENDERBUFFER, sceneRBO);
+                glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, framebufferWidth, framebufferHeight);
+
+                framebufferResized = false;
+            }
+
+
+     //Shadow Pass
+
             //shadow mapping
             glm::mat4 lightProjection = glm::ortho(-15.0f, 15.0f, -15.0f, 15.0f, 0.1f, 50.0f);
             glm::mat4 lightView = glm::lookAt(lightPos, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
@@ -358,14 +318,14 @@ int main()
             glActiveTexture(GL_TEXTURE2);
             glBindTexture(GL_TEXTURE_2D, depthMap);
 
-            glm::mat4 shadowModel = glm::mat4(1.0f);
-            shadowModel = glm::scale(shadowModel, glm::vec3(0.01f));
-
-            shadowShader.setMat4("model", shadowModel);
+            glm::mat4 model = testTransform.getMatrix();
+            shadowShader.setMat4("model", model);
             testModel.draw(shadowShader);
             
+     //Scene Pass
+
             glBindFramebuffer(GL_FRAMEBUFFER, sceneFBO);
-            glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+            glViewport(0, 0, framebufferWidth, framebufferHeight);
 
             glClearColor(0.1f, 0.2f, 0.3f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -373,11 +333,6 @@ int main()
             shader.use();
 
             shader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
-
-            glm::mat4 model = glm::mat4(1.0f);
-            model = glm::scale(model, glm::vec3(0.01f));
-
-            model = glm::translate(model, glm::vec3(0.0f, 0.0f, 0.0f));
 
             shader.setMat4("model", model);
 
@@ -409,38 +364,17 @@ int main()
             glm::mat4 view = camera.getViewMatrix();
 
             //projection
-            glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), 1280.0f / 720.0f, 0.1f, 100.0f);
+            glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight), 0.1f, 100.0f);
 
             shader.setMat4("view", view);
             shader.setMat4("projection", projection);
 
             testModel.draw(shader);
 
-            for (int i = 0; i < 5; ++i)
-            {
-                glm::mat4 model = glm::mat4(1.0f);
-
-                model = glm::translate(
-                    model,
-                    cubePositions[i]
-                );
-
-                shader.setMat4("model", model);
-
-                if (i % 2 == 0)
-                {
-                    woodMaterial.bind(shader);
-                }
-                else
-                {
-                    shinyMaterial.bind(shader);
-                }
-
-                cubeMesh.draw();
-            }
+      //Screen Pass
 
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
-            glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+            glViewport(0, 0, framebufferWidth, framebufferHeight);
 
             glDisable(GL_DEPTH_TEST);
 
@@ -448,6 +382,7 @@ int main()
             glClear(GL_COLOR_BUFFER_BIT);
 
             screenShader.use();
+            screenShader.setInt("toneMappingMode", toneMappingMode);
 
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, sceneColorTexture);

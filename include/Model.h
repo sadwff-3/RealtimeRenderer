@@ -5,6 +5,7 @@
 #include "Material.h"
 #include "Shader.h"
 
+#include<glm/glm.hpp> 
 #include<memory>
 #include<unordered_map>
 #include <assimp/scene.h>
@@ -33,8 +34,8 @@ private:
     std::unique_ptr<Texture> defaultAO;
 
     void loadModel(const std::string& path);
-    void processNode(aiNode* node, const aiScene* scene);
-    Mesh processMesh(aiMesh* mesh, const aiScene* scene);
+    void processNode(aiNode* node, const aiScene* scene, const glm::mat4& parentTransform);
+    Mesh processMesh(aiMesh* mesh, const aiScene* scene, const glm::mat4& transform);
 
     Texture* loadTexture(const std::string& path, bool srgb);
 };

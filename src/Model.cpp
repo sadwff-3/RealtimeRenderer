@@ -5,6 +5,19 @@
 
 #include <iostream>
 
+
+static glm::mat4 aiMatrixToGlm(const aiMatrix4x4& m)
+{
+	glm::mat4 result;
+
+	result[0][0] = m.a1; result[1][0] = m.a2; result[2][0] = m.a3; result[3][0] = m.a4;
+	result[0][1] = m.b1; result[1][1] = m.b2; result[2][1] = m.b3; result[3][1] = m.b4;
+	result[0][2] = m.c1; result[1][2] = m.c2; result[2][2] = m.c3; result[3][2] = m.c4;
+	result[0][3] = m.d1; result[1][3] = m.d2; result[2][3] = m.d3; result[3][3] = m.d4;
+
+	return result;
+}
+
 Model::Model(const std::string& path)
 {
 	defaultDiffuse = std::make_unique<Texture>(255, 255, 255);
@@ -29,24 +42,27 @@ void Model::loadModel(const std::string& path)
 
 	directory = path.substr(0, path.find_last_of("/\\"));
 
-	processNode(scene->mRootNode, scene);
+	processNode(scene->mRootNode, scene, glm::mat4(1.0f));
 }
 
-void Model::processNode(aiNode* node, const aiScene* scene)
+void Model::processNode(aiNode* node, const aiScene* scene, const glm::mat4& parentTransform)
 {
+	glm::mat4 localTransform = aiMatrixToGlm(node->mTransformation);
+	glm::mat4 globalTransform = parentTransform * localTransform;
+
 	for (unsigned int i = 0;i < node->mNumMeshes;++i)
 	{
 		aiMesh* mesh = scene->mMeshes[node->mMeshes[i]];
-		meshes.push_back(processMesh(mesh, scene));
+		meshes.push_back(processMesh(mesh, scene, globalTransform));
 	}
 
 	for (unsigned int i = 0;i < node->mNumChildren;++i)
 	{
-		processNode(node->mChildren[i], scene);
+		processNode(node->mChildren[i], scene, globalTransform);
 	}
 }
 
-Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
+Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene, const glm::mat4& transform)
 {
 
 	std::vector<Vertex> vertices;
@@ -61,10 +77,20 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
 	if (mesh->mMaterialIndex < scene->mNumMaterials)
 	{
 		aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];
-
+		
+		unsigned int baseColorCount = material->GetTextureCount(aiTextureType_BASE_COLOR);
 		unsigned int diffuseCount = material->GetTextureCount(aiTextureType_DIFFUSE);
+		
+		if (baseColorCount > 0)
+		{
+			aiString texturePath;
+			material->GetTexture(aiTextureType_BASE_COLOR, 0, &texturePath);
 
-		if (diffuseCount > 0)
+			std::string fullPath = directory + "/" + texturePath.C_Str();
+			diffuseTexture = loadTexture(fullPath, true);
+		}
+
+		else if (diffuseCount > 0)
 		{
 			aiString texturePath;
 			material->GetTexture(aiTextureType_DIFFUSE, 0, &texturePath);
@@ -129,15 +155,18 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
 	}
 
 	vertices.reserve(mesh->mNumVertices);
+	glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(transform)));
 
 	for (unsigned int i = 0;i < mesh->mNumVertices;++i)
 	{
 		Vertex vertex{};
-		
-		vertex.position = glm::vec3(mesh->mVertices[i].x, mesh->mVertices[i].y, mesh->mVertices[i].z);
+		glm::vec4 localPosition(mesh->mVertices[i].x, mesh->mVertices[i].y, mesh->mVertices[i].z, 1.0f);
+		vertex.position = glm::vec3(transform * localPosition);
+
 		if (mesh->HasNormals())
 		{
-			vertex.normal = glm::vec3(mesh->mNormals[i].x, mesh->mNormals[i].y, mesh->mNormals[i].z);
+			glm::vec3 localNormal(mesh->mNormals[i].x, mesh->mNormals[i].y, mesh->mNormals[i].z);
+			vertex.normal = glm::normalize(normalMatrix * localNormal);
 		}
 		if (mesh->mTextureCoords[0])
 		{

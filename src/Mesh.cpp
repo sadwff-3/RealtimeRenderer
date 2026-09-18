@@ -124,7 +124,7 @@ Mesh::~Mesh()
 
     if (VAO != 0)
     {
-        glDeleteBuffers(1, &VAO);
+        glDeleteVertexArrays(1, &VAO);
     }
 }
 
@@ -141,7 +141,7 @@ Mesh& Mesh::operator=(Mesh&& other)noexcept
     {
         if (EBO != 0)
         {
-            glDeleteBuffers(1, &VBO);
+            glDeleteBuffers(1, &EBO);
         }
 
         if (VBO != 0)

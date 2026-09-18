@@ -73,6 +73,7 @@ add_executable(
     src/Material.cpp
     src/Mesh.cpp
     src/Model.cpp
+    src/Transform.cpp
 )
 
 target_include_directories(
