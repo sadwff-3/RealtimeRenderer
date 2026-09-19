@@ -6,6 +6,8 @@
 #include"Model.h"
 #include"Light.h"
 #include"Transform.h"
+#include"SceneObject.h"
+#include"Scene.h"
 #include<glad/gl.h>
 #include<GLFW/glfw3.h>
 #include<glm/glm.hpp>
@@ -110,9 +112,19 @@ int main()
         Shader shadowDebugShader("shaders/shadow_debug.vert", "shaders/shadow_debug.frag");
        
         Model testModel("assets/sponza_pbr/Sponza.gltf");
-
-        Transform testTransform;
+        Model helmetModel("assets/flight_helmet/FlightHelmet.gltf");
         
+        Scene scene;
+        SceneObject& testObject = scene.addObject("Sponza", &testModel);
+
+        SceneObject& helmet1 = scene.addObject("Helmet1", &helmetModel);
+        SceneObject& helmet2 = scene.addObject("Helmet2", &helmetModel);
+
+        helmet1.transform.position = glm::vec3(-1.5f, 0.0f, 0.0f);
+        helmet2.transform.position = glm::vec3(1.5f, 0.0f, 0.0f);
+
+
+
 
         //debug
         std::vector<Vertex> debugQuadVertices =
@@ -318,9 +330,12 @@ int main()
             glActiveTexture(GL_TEXTURE2);
             glBindTexture(GL_TEXTURE_2D, depthMap);
 
-            glm::mat4 model = testTransform.getMatrix();
-            shadowShader.setMat4("model", model);
-            testModel.draw(shadowShader);
+            for (const auto& object : scene.getObjects())
+            {
+                glm::mat4 model = object->transform.getMatrix();
+                shadowShader.setMat4("model", model);
+                object->model->draw(shadowShader);
+            }
             
      //Scene Pass
 
@@ -333,8 +348,6 @@ int main()
             shader.use();
 
             shader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
-
-            shader.setMat4("model", model);
 
 
             //DirectionalLightPos
@@ -369,7 +382,12 @@ int main()
             shader.setMat4("view", view);
             shader.setMat4("projection", projection);
 
-            testModel.draw(shader);
+            for (const auto& object : scene.getObjects())
+            {
+                glm::mat4 model = object->transform.getMatrix();
+                shader.setMat4("model", model);
+                object->model->draw(shader);
+            }
 
       //Screen Pass
 
