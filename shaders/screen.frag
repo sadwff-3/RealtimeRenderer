@@ -6,6 +6,7 @@ out vec4 FragColor;
 uniform float exposure;
 uniform sampler2D screenTexture;
 uniform int toneMappingMode;
+uniform int debugView;
 
 vec3 ACESFilm(vec3 x)
 {
@@ -23,6 +24,19 @@ void main()
     vec3 hdrColor = texture(screenTexture, TexCoord).rgb;
 
     hdrColor *= exposure;
+
+    if(debugView != 0)
+    {
+        vec3 displayColor = hdrColor;
+
+        if(debugView == 1)
+        {
+            displayColor = pow(max(hdrColor, vec3(0.0)), vec3(1.0 / 2.2));
+        }
+
+        FragColor = vec4(displayColor, 1.0);
+        return;
+    }
 
     vec3 mapped;
 

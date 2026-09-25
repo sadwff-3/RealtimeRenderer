@@ -8,6 +8,9 @@
 #include"Transform.h"
 #include"SceneObject.h"
 #include"Scene.h"
+#include"AssetManager.h"
+#include"Renderer.h"
+
 #include<glad/gl.h>
 #include<GLFW/glfw3.h>
 #include<glm/glm.hpp>
@@ -106,19 +109,19 @@ int main()
     
     //shader•’•°•§•Î§Ú’i§ﬂﬁz§‡
     {
-        Shader shader("shaders/pbr.vert", "shaders/pbr.frag");
-        Shader screenShader("shaders/screen.vert", "shaders/screen.frag");
-        Shader shadowShader("shaders/shadow_depth.vert", "shaders/shadow_depth.frag");
-        Shader shadowDebugShader("shaders/shadow_debug.vert", "shaders/shadow_debug.frag");
-       
-        Model testModel("assets/sponza_pbr/Sponza.gltf");
-        Model helmetModel("assets/flight_helmet/FlightHelmet.gltf");
         
+        Shader shadowDebugShader("shaders/shadow_debug.vert", "shaders/shadow_debug.frag");
+        
+        AssetManager assets;
         Scene scene;
-        SceneObject& testObject = scene.addObject("Sponza", &testModel);
+        Renderer renderer(framebufferWidth, framebufferHeight);
 
-        SceneObject& helmet1 = scene.addObject("Helmet1", &helmetModel);
-        SceneObject& helmet2 = scene.addObject("Helmet2", &helmetModel);
+        Model* testModel = assets.loadModel("assets/sponza_pbr/Sponza.gltf");
+        Model* helmetModel = assets.loadModel("assets/flight_helmet/FlightHelmet.gltf");
+
+        SceneObject& testObject = scene.addObject("Sponza", testModel);
+        SceneObject& helmet1 = scene.addObject("Helmet1", helmetModel);
+        SceneObject& helmet2 = scene.addObject("Helmet2", helmetModel);
 
         helmet1.transform.position = glm::vec3(-1.5f, 0.0f, 0.0f);
         helmet2.transform.position = glm::vec3(1.5f, 0.0f, 0.0f);
@@ -143,97 +146,25 @@ int main()
 
         Mesh debugQuad(debugQuadVertices, debugQuadIndices);
 
-
-        shader.use();
-        
-        shader.setInt("shadowMap", 2);
-
-
         shadowDebugShader.use();
         shadowDebugShader.setInt("depthMap", 0);
-        screenShader.use();
-        screenShader.setInt("screenTexture", 0);
-        screenShader.setFloat("exposure", 1.0f);
-
 
         glEnable(GL_DEPTH_TEST);
-
-        unsigned int sceneFBO;
-        glGenFramebuffers(1, &sceneFBO);
-        glBindFramebuffer(GL_FRAMEBUFFER , sceneFBO);
-
-        //color attchment
-        unsigned int sceneColorTexture;
-        glGenTextures(1, &sceneColorTexture);
-        glBindTexture(GL_TEXTURE_2D, sceneColorTexture);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, framebufferWidth, framebufferHeight, 0, GL_RGB, GL_FLOAT, nullptr);
-
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sceneColorTexture, 0);
-
-        //Depth
-        unsigned int sceneRBO;
-        glGenRenderbuffers(1, &sceneRBO);
-        glBindRenderbuffer(GL_RENDERBUFFER, sceneRBO);
-        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, framebufferWidth, framebufferHeight);
-
-        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, sceneRBO);
-
-        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-        {
-            std::cerr << "Scene framebuffer is not complete!\n";
-        }
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-
-        //shadow map create
-        const unsigned int SHADOW_WIDTH = 2048;
-        const unsigned int SHADOW_HEIGHT = 2048;
-       
-        unsigned int depthMapFBO;
-        glGenFramebuffers(1, &depthMapFBO);
-
-        unsigned int depthMap; 
-        glGenTextures(1, &depthMap);
-        glBindTexture(GL_TEXTURE_2D, depthMap);
-
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
-
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-
-        float borderColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
-        glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
-
-        glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthMap, 0);
-
-        glDrawBuffer(GL_NONE);
-        glReadBuffer(GL_NONE);
-
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
         float deltaTime = 0.0f;
         float lastFrame = 0.0f;
         int toneMappingMode = 1;
+        int debugView = 0;
         
         //Lights
         PointLight lights[2];
         DirectionalLight directionalLight;
 
-       
-
-
+      
         directionalLight.direction = glm::vec3(-0.2f, -0.1f, -0.3f);
         directionalLight.color = glm::vec3(1.0f);
         directionalLight.intensity = 0.8f;
 
-        glm::vec3 lightPos = -directionalLight.direction * 20.0f;
 
         lights[0].position = glm::vec3(1.2f, 1.0f, 2.0f);
         lights[0].color = glm::vec3(1.0f, 1.0f, 1.0f);
@@ -295,6 +226,14 @@ int main()
                 toneMappingMode = 1;
             }
 
+            if (glfwGetKey(window, GLFW_KEY_F1) == GLFW_PRESS) debugView = 0;
+            if (glfwGetKey(window, GLFW_KEY_F2) == GLFW_PRESS) debugView = 1;
+            if (glfwGetKey(window, GLFW_KEY_F3) == GLFW_PRESS) debugView = 2;
+            if (glfwGetKey(window, GLFW_KEY_F4) == GLFW_PRESS) debugView = 3;
+            if (glfwGetKey(window, GLFW_KEY_F5) == GLFW_PRESS) debugView = 4;
+            if (glfwGetKey(window, GLFW_KEY_F6) == GLFW_PRESS) debugView = 5;
+            if (glfwGetKey(window, GLFW_KEY_F7) == GLFW_PRESS) debugView = 6;
+
             if (framebufferWidth == 0 || framebufferHeight == 0)
             {
                 glfwPollEvents();
@@ -303,111 +242,26 @@ int main()
 
             if (framebufferResized)
             {
-                glBindTexture(GL_TEXTURE_2D, sceneColorTexture);
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, framebufferWidth, framebufferHeight, 0, GL_RGB, GL_FLOAT, nullptr);
-
-                glBindRenderbuffer(GL_RENDERBUFFER, sceneRBO);
-                glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, framebufferWidth, framebufferHeight);
-
+                renderer.resizeSceneFramebuffer(framebufferWidth, framebufferHeight);
                 framebufferResized = false;
             }
-
-
-     //Shadow Pass
-
-            //shadow mapping
-            glm::mat4 lightProjection = glm::ortho(-15.0f, 15.0f, -15.0f, 15.0f, 0.1f, 50.0f);
-            glm::mat4 lightView = glm::lookAt(lightPos, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-            glm::mat4 lightSpaceMatrix = lightProjection * lightView;
-            glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
-            glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
-            glClear(GL_DEPTH_BUFFER_BIT);
+    
+         //ShadowPass
+            glm::mat4 lightSpaceMatrix = renderer.renderShadowPass(scene, directionalLight);
             
+         //ScenePass
+           // renderer.renderScenePass(scene, camera, directionalLight, lights, 2, lightSpaceMatrix);
+
+         //Geometry Pass
+            renderer.renderGeometryPass(scene, camera);
+
+         //Deferred Lighting Pass
+            renderer.renderDeferredLightingPass(debugQuad, camera, directionalLight, lights, 2, lightSpaceMatrix, debugView);
+
+         //ScreenPass
+            renderer.renderScreenPass(debugQuad, toneMappingMode, debugView);
             
-            shadowShader.use();
-            shadowShader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
-            
-            glActiveTexture(GL_TEXTURE2);
-            glBindTexture(GL_TEXTURE_2D, depthMap);
-
-            for (const auto& object : scene.getObjects())
-            {
-                glm::mat4 model = object->transform.getMatrix();
-                shadowShader.setMat4("model", model);
-                object->model->draw(shadowShader);
-            }
-            
-     //Scene Pass
-
-            glBindFramebuffer(GL_FRAMEBUFFER, sceneFBO);
-            glViewport(0, 0, framebufferWidth, framebufferHeight);
-
-            glClearColor(0.1f, 0.2f, 0.3f, 1.0f);
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-            shader.use();
-
-            shader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
-
-
-            //DirectionalLightPos
-            shader.setVec3("directionalLight.direction", directionalLight.direction);
-            shader.setVec3("directionalLight.color", directionalLight.color);
-            shader.setFloat("directionalLight.intensity", directionalLight.intensity);
-
-            //PointlightPos
-            shader.setInt("pointLightCount", 2);
-            for (int i = 0; i < 2; ++i)
-            {
-                std::string base = "pointLights[" + std::to_string(i) + "]";
-
-                shader.setVec3((base + ".position").c_str(), lights[i].position);
-                shader.setVec3((base + ".color").c_str(), lights[i].color);
-                shader.setFloat((base + ".intensity").c_str(), lights[i].intensity);
-
-                shader.setFloat(base + ".constant", lights[i].constant);
-                shader.setFloat(base + ".linear", lights[i].linear);
-                shader.setFloat(base + ".quadratic", lights[i].quadratic);
-            }
-
-            //viewerPos
-            shader.setVec3("viewPos", camera.Position);
-
-            //view
-            glm::mat4 view = camera.getViewMatrix();
-
-            //projection
-            glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight), 0.1f, 100.0f);
-
-            shader.setMat4("view", view);
-            shader.setMat4("projection", projection);
-
-            for (const auto& object : scene.getObjects())
-            {
-                glm::mat4 model = object->transform.getMatrix();
-                shader.setMat4("model", model);
-                object->model->draw(shader);
-            }
-
-      //Screen Pass
-
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
-            glViewport(0, 0, framebufferWidth, framebufferHeight);
-
-            glDisable(GL_DEPTH_TEST);
-
-            glClearColor(0.1f, 0.2f, 0.3f, 1.0f);
-            glClear(GL_COLOR_BUFFER_BIT);
-
-            screenShader.use();
-            screenShader.setInt("toneMappingMode", toneMappingMode);
-
-            glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, sceneColorTexture);
-
-            debugQuad.draw();
-
-            glEnable(GL_DEPTH_TEST);
+           
 
             if (glfwGetKey(window, GLFW_KEY_B) == GLFW_PRESS)
             {
@@ -416,7 +270,7 @@ int main()
                 shadowDebugShader.use();
 
                 glActiveTexture(GL_TEXTURE0);
-                glBindTexture(GL_TEXTURE_2D, depthMap);
+                glBindTexture(GL_TEXTURE_2D, renderer.getShadowMap());
 
                 debugQuad.draw();
 
