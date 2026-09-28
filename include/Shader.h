@@ -33,6 +33,8 @@ public:
     float value
 ) const;
 
+    void setVec4(const std::string& name, const glm::vec4& value) const;
+
 private:
     void checkCompileErrors(
         unsigned int object,

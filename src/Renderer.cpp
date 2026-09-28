@@ -10,18 +10,34 @@
 #include<glm/gtc/matrix_transform.hpp>
 #include <iostream>
 #include <algorithm>
+#include<random>
 
-Renderer::Renderer(int width, int height) :shadowShader("shaders/shadow_depth.vert", "shaders/shadow_depth.frag"), sceneShader("shaders/pbr.vert", "shaders/pbr.frag"), screenShader("shaders/screen.vert", "shaders/screen.frag"), geometryShader("shaders/gbuffer.vert", "shaders/gbuffer.frag"), deferredShader("shaders/screen.vert", "shaders/deferred_lighting.frag"), framebufferWidth(width), framebufferHeight(height)
+Renderer::Renderer(int width, int height) :shadowShader("shaders/shadow_depth.vert", "shaders/shadow_depth.frag"), sceneShader("shaders/pbr.vert", "shaders/pbr.frag"), screenShader("shaders/screen.vert", "shaders/screen.frag"), geometryShader("shaders/gbuffer.vert", "shaders/gbuffer.frag"), ssaoShader("shaders/screen.vert", "shaders/ssao.frag"), ssaoBlurShader("shaders/screen.vert", "shaders/ssao_blur.frag"), deferredShader("shaders/screen.vert", "shaders/deferred_lighting.frag"), framebufferWidth(width), framebufferHeight(height)
 {
 	initShadowMap();
 	initSceneFramebuffer();
 	initGBuffer();
+	initSSAOFramebuffer();
+	initSSAOKernel();
+	initSSAONoiseTexture();
+	initSSAOBlur();
+
+	ssaoShader.use();
+	ssaoShader.setInt("gDepth", 0);
+	ssaoShader.setInt("gNormal", 1);
+	ssaoShader.setInt("noiseTexture", 2);
+
+	ssaoBlurShader.use();
+	ssaoBlurShader.setInt("ssaoInput", 0);
+
 	deferredShader.use();
 	deferredShader.setInt("gNormal", 0);
 	deferredShader.setInt("gAlbedo", 1);
 	deferredShader.setInt("gMaterial", 2);
 	deferredShader.setInt("gDepth", 3);
 	deferredShader.setInt("shadowMap", 4);
+	deferredShader.setInt("ssaoMap", 5);
+
 	sceneShader.use();
 	sceneShader.setInt("shadowMap", 2);
 	screenShader.use();
@@ -76,10 +92,30 @@ Renderer::~Renderer()
 		glDeleteTextures(1, &gDepth);
 	}
 
+	if (ssaoTexture != 0)
+	{
+		glDeleteTextures(1, &ssaoTexture);
+	}
+	if (ssaoFBO != 0)
+	{
+		glDeleteFramebuffers(1, &ssaoFBO);
+	}
+
 	if (gBuffer != 0)
 	{
 		glDeleteFramebuffers(1, &gBuffer);
 	}
+
+	if (ssaoBlurTexture != 0)
+	{
+		glDeleteTextures(1, &ssaoBlurTexture);
+	}
+
+	if (ssaoBlurFBO != 0)
+	{
+		glDeleteFramebuffers(1, &ssaoBlurFBO);
+	}
+
 }
 
 void Renderer::initShadowMap()
@@ -201,6 +237,108 @@ void Renderer::initGBuffer()
 }
 
 
+void Renderer::initSSAOFramebuffer()
+{
+	glGenFramebuffers(1, &ssaoFBO);
+	glBindFramebuffer(GL_FRAMEBUFFER, ssaoFBO);
+
+	glGenTextures(1, &ssaoTexture);
+	glBindTexture(GL_TEXTURE_2D, ssaoTexture);
+
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, framebufferWidth, framebufferHeight, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
+	
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ssaoTexture, 0);
+
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+	{
+		std::cerr << "SSAO framebuffer is not complete!\n";
+	}
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+
+void Renderer::initSSAOBlur()
+{
+	glGenFramebuffers(1, &ssaoBlurFBO);
+	glBindFramebuffer(GL_FRAMEBUFFER, ssaoBlurFBO);
+
+	glGenTextures(1, &ssaoBlurTexture);
+	glBindTexture(GL_TEXTURE_2D, ssaoBlurTexture);
+
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, framebufferWidth, framebufferHeight, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ssaoBlurTexture, 0);
+
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+	{
+		std::cerr << "SSAO Blur framebuffer is not complete!\n";
+	}
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+
+void Renderer::initSSAOKernel()
+{
+	std::mt19937 rng(42);
+	std::uniform_real_distribution<float> random01(0.0f, 1.0f);
+
+	for (size_t i = 0; i < ssaoKernel.size(); ++i)
+	{
+		glm::vec3 sample(random01(rng) * 2.0f - 1.0f, random01(rng) * 2.0f - 1.0f, random01(rng));
+
+		sample = glm::normalize(sample);
+		sample *= random01(rng);
+
+		float t = static_cast<float>(i) / ssaoKernel.size();
+		sample *= glm::mix(0.1f, 1.0f, t * t);
+
+		ssaoKernel[i] = sample;
+
+	}
+
+}
+
+
+void Renderer::initSSAONoiseTexture()
+{
+	std::mt19937 rng(1337);
+	std::uniform_real_distribution<float> random(-1.0f, 1.0f);
+
+	std::array<float, 4 * 4 * 3> noise{};
+
+	for (size_t i = 0; i < 16; ++i)
+	{
+		noise[i * 3] = random(rng);
+		noise[i * 3 + 1] = random(rng);
+		noise[i * 3 + 2] = random(rng);
+	}
+
+	glGenTextures(1, &ssaoNoiseTexture);
+	glBindTexture(GL_TEXTURE_2D, ssaoNoiseTexture);
+
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, 4, 4, 0, GL_RGB, GL_FLOAT, noise.data());
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+	glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+
 glm::mat4 Renderer::renderShadowPass(const Scene& scene, const DirectionalLight& light)
 {
 	glm::vec3 lightPos = -light.direction * 20.0f;
@@ -268,6 +406,65 @@ void Renderer::renderGeometryPass(const Scene& scene, Camera& camera)
 }
 
 
+void Renderer::renderSSAOPass(Mesh& quad, Camera& camera)
+{
+	glBindFramebuffer(GL_FRAMEBUFFER, ssaoFBO);
+	glViewport(0, 0, framebufferWidth, framebufferHeight);
+
+	glDisable(GL_DEPTH_TEST);
+	glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
+
+	ssaoShader.use();
+
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, gDepth);
+
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D, gNormal);
+
+	glActiveTexture(GL_TEXTURE2);
+	glBindTexture(GL_TEXTURE_2D, ssaoNoiseTexture);
+
+	glm::mat4 view = camera.getViewMatrix();
+	glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), static_cast<float>(framebufferWidth) / framebufferHeight, 0.1f, 100.0f);
+
+	ssaoShader.setMat4("view", view);
+	ssaoShader.setMat4("projection", projection);
+	ssaoShader.setMat4("inverseProjection", glm::inverse(projection));
+
+	for (size_t i = 0; i < ssaoKernel.size(); ++i)
+	{
+		ssaoShader.setVec3("samples[" + std::to_string(i) + "]", ssaoKernel[i]);
+	}
+
+	quad.draw();
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glEnable(GL_DEPTH_TEST);
+}
+
+
+void Renderer::renderSSAOBlurPass(Mesh& quad)
+{
+	glBindFramebuffer(GL_FRAMEBUFFER, ssaoBlurFBO);
+	glViewport(0, 0, framebufferWidth, framebufferHeight);
+
+	glDisable(GL_DEPTH_TEST);
+	glClear(GL_COLOR_BUFFER_BIT);
+
+	ssaoBlurShader.use();
+
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, ssaoTexture);
+
+	quad.draw();
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glEnable(GL_DEPTH_TEST);
+}
+
+
 void Renderer::renderDeferredLightingPass(Mesh& quad, Camera& camera, const DirectionalLight& directionalLight, const PointLight* pointLights, int pointLightCount, const glm::mat4& lightSpaceMatrix, int debugView)
 {
 	glBindFramebuffer(GL_FRAMEBUFFER, sceneFBO);
@@ -294,6 +491,10 @@ void Renderer::renderDeferredLightingPass(Mesh& quad, Camera& camera, const Dire
 	glActiveTexture(GL_TEXTURE4);
 	glBindTexture(GL_TEXTURE_2D, depthMap);
 
+	glActiveTexture(GL_TEXTURE5);
+	glBindTexture(GL_TEXTURE_2D, ssaoBlurTexture);
+
+
 	glm::mat4 view = camera.getViewMatrix();
 	glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight), 0.1f, 100.0f);
 
@@ -306,6 +507,7 @@ void Renderer::renderDeferredLightingPass(Mesh& quad, Camera& camera, const Dire
 	deferredShader.setVec3("directionalLight.direction", directionalLight.direction);
 	deferredShader.setVec3("directionalLight.color", directionalLight.color);
 	deferredShader.setFloat("directionalLight.intensity", directionalLight.intensity);
+	
 	deferredShader.setInt("debugView", debugView);
 
 	int count = std::min(pointLightCount, 4);
@@ -432,6 +634,13 @@ void Renderer::resizeSceneFramebuffer(int width, int height)
 
 	glBindTexture(GL_TEXTURE_2D, gDepth);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, framebufferWidth, framebufferHeight, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+
+	glBindTexture(GL_TEXTURE_2D, ssaoTexture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, framebufferWidth, framebufferHeight, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
+
+	glBindTexture(GL_TEXTURE_2D, ssaoBlurTexture);
+
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, framebufferWidth, framebufferHeight, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
 }
 
 

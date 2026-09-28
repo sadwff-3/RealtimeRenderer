@@ -10,6 +10,13 @@ void Material::bind(Shader& shader) const
 {
 	shader.use();
 
+	shader.setVec4("baseColorFactor", baseColorFactor);
+	shader.setFloat("metallicFactor", metallicFactor);
+	shader.setFloat("roughnessFactor", roughnessFactor);
+	shader.setFloat("normalYSign", normalYSign);
+	shader.setInt("alphaMode", alphaMode);
+	shader.setFloat("alphaCutoff", alphaCutoff);
+
 	shader.setInt("albedoMap", 0);
 	shader.setInt("normalMap", 1);
 	shader.setInt("metallicMap", 3);

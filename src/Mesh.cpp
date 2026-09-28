@@ -1,5 +1,6 @@
 #include"Mesh.h"
 #include <iostream>
+#include <stdexcept>
 
 Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices)
     : vertices(vertices), indices(indices)
@@ -61,6 +62,17 @@ void Mesh::calculateTangents()
         unsigned int i0 = indices[i];
         unsigned int i1 = indices[i + 1];
         unsigned int i2 = indices[i + 2];
+
+
+        if (i0 >= vertices.size() || i1 >= vertices.size() || i2 >= vertices.size()) {
+            std::cerr << "Invalid mesh indices at triangle " << i / 3
+                 << ": (" << i0 << ", " << i1 << ", " << i2 << ")"
+                 << ", vertex count = " << vertices.size()
+                 << ", index count = " << indices.size() << '\n';
+            throw std::out_of_range("Mesh vertex index out of range");
+            
+        }
+
 
         Vertex& v0 = vertices[i0];
         Vertex& v1 = vertices[i1];

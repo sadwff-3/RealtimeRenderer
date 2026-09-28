@@ -8,6 +8,7 @@ uniform sampler2D gAlbedo;
 uniform sampler2D gMaterial;
 uniform sampler2D gDepth;
 uniform sampler2D shadowMap;
+uniform sampler2D ssaoMap;
 
 uniform mat4 inverseViewProjection;
 uniform mat4 lightSpaceMatrix;
@@ -45,7 +46,7 @@ float calculateShadow(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir)
     vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
     projCoords = projCoords * 0.5 + 0.5;
 
-    if (projCoords.z > 1.0)
+    if (any(lessThan(projCoords, vec3(0.0))) || any(greaterThan(projCoords, vec3(1.0))))
     {
         return 0.0;
     }
@@ -149,6 +150,13 @@ void main()
         return;
     }
 
+    if (debugView == 7)
+    {
+        float ssao = texture(ssaoMap, TexCoord).r;
+        FragColor = vec4(vec3(ssao), 1.0);
+        return;
+    } 
+
     if(depth >= 1.0)
     {
         FragColor = vec4(0.1, 0.2, 0.3, 1.0);
@@ -223,7 +231,8 @@ void main()
     vec4 fragPosLightSpace = lightSpaceMatrix * vec4(fragPos, 1.0);
     float shadow = calculateShadow(fragPosLightSpace, N, L);
 
-    vec3 ambient = vec3(0.03) * albedo * ao;
+    float ssao = texture(ssaoMap, TexCoord).r;
+    vec3 ambient = vec3(0.12) * albedo * ao * ssao;
     vec3 lighting = ambient + (1.0 - shadow) * directLighting;
 
     for (int i = 0; i < min(pointLightCount, MAX_POINT_LIGHTS); ++i)

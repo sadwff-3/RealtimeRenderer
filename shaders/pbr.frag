@@ -14,6 +14,12 @@ uniform sampler2D shadowMap;
 uniform sampler2D metallicMap;
 uniform sampler2D roughnessMap;
 uniform sampler2D aoMap;
+uniform vec4 baseColorFactor;
+uniform float metallicFactor;
+uniform float roughnessFactor;
+uniform float normalYSign;
+uniform int alphaMode;
+uniform float alphaCutoff;
 
 struct PointLight
 {
@@ -48,7 +54,7 @@ float calculateShadow(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir)
     vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
     projCoords = projCoords * 0.5 + 0.5;
 
-    if (projCoords.z > 1.0)
+    if (any(lessThan(projCoords, vec3(0.0))) || any(greaterThan(projCoords, vec3(1.0))))
     {
         return 0.0;
     }
@@ -123,13 +129,16 @@ float geometrySmith(vec3 N, vec3 V, vec3 L, float roughness)
 
 void main()
 {
-    vec3 albedo = texture(albedoMap, TexCoord).rgb;
-    float metallic = texture(metallicMap, TexCoord).b;
-    float roughness = texture(roughnessMap, TexCoord).g;
+    vec4 baseColor = texture(albedoMap, TexCoord) * baseColorFactor;
+    if (alphaMode == 1 && baseColor.a < alphaCutoff) discard;
+    vec3 albedo = baseColor.rgb;
+    float metallic = texture(metallicMap, TexCoord).b * metallicFactor;
+    float roughness = texture(roughnessMap, TexCoord).g * roughnessFactor;
     float ao = texture(aoMap, TexCoord).r;
 
     vec3 tangentNormal = texture(normalMap, TexCoord).rgb;
     tangentNormal = tangentNormal * 2.0 - 1.0;
+    tangentNormal.y *= normalYSign;
 
     vec3 norm = normalize(TBN * tangentNormal);
     vec3 viewDir = normalize(viewPos - FragPos);

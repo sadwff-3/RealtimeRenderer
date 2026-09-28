@@ -62,7 +62,7 @@ void scroll_callback(GLFWwindow* window,double xoffset,double yoffset)
     camera.processMouseScroll(static_cast<float>(yoffset));
 }
 
-int main()
+int main(int argc, char** argv)
 {
     if (!glfwInit())
     {
@@ -116,15 +116,16 @@ int main()
         Scene scene;
         Renderer renderer(framebufferWidth, framebufferHeight);
 
-        Model* testModel = assets.loadModel("assets/sponza_pbr/Sponza.gltf");
-        Model* helmetModel = assets.loadModel("assets/flight_helmet/FlightHelmet.gltf");
+        Model* livingRoom = assets.loadModel("assets/LivingRoom/living_room.obj");
 
-        SceneObject& testObject = scene.addObject("Sponza", testModel);
-        SceneObject& helmet1 = scene.addObject("Helmet1", helmetModel);
-        SceneObject& helmet2 = scene.addObject("Helmet2", helmetModel);
-
-        helmet1.transform.position = glm::vec3(-1.5f, 0.0f, 0.0f);
-        helmet2.transform.position = glm::vec3(1.5f, 0.0f, 0.0f);
+        if (livingRoom)
+        {
+            scene.addObject("LivingRoom", livingRoom);
+        }
+        else
+        {
+            std::cerr << "Failed to load Living Room\n";
+        }
 
 
 
@@ -160,27 +161,27 @@ int main()
         PointLight lights[2];
         DirectionalLight directionalLight;
 
-      
-        directionalLight.direction = glm::vec3(-0.2f, -0.1f, -0.3f);
-        directionalLight.color = glm::vec3(1.0f);
-        directionalLight.intensity = 0.8f;
+
+        directionalLight.direction = glm::normalize(glm::vec3(0.65f, -0.8f, -0.4f));
+        directionalLight.color = glm::vec3(1.0f, 0.97f, 0.92f);
+        directionalLight.intensity = 3.0f;
 
 
-        lights[0].position = glm::vec3(1.2f, 1.0f, 2.0f);
-        lights[0].color = glm::vec3(1.0f, 1.0f, 1.0f);
-        lights[0].intensity = 1.0f;
+        //lights[0].position = glm::vec3(1.2f, 1.0f, 2.0f);
+        //lights[0].color = glm::vec3(1.0f, 1.0f, 1.0f);
+       // lights[0].intensity = 1.0f;
 
-        lights[0].constant = 1.0f;
-        lights[0].linear = 0.09f;
-        lights[0].quadratic = 0.032f;
+       // lights[0].constant = 1.0f;
+     //   lights[0].linear = 0.09f;
+       // lights[0].quadratic = 0.032f;
 
-        lights[1].position = glm::vec3(-2.0f, 1.0f, 1.0f);
-        lights[1].color = glm::vec3(1.0f, 0.2f, 0.2f);
-        lights[1].intensity = 0.7f;
+        //lights[1].position = glm::vec3(-2.0f, 1.0f, 1.0f);
+        //lights[1].color = glm::vec3(1.0f, 0.2f, 0.2f);
+        //lights[1].intensity = 0.7f;
 
-        lights[1].constant = 1.0f;
-        lights[1].linear = 0.09f;
-        lights[1].quadratic = 0.032f;
+       // lights[1].constant = 1.0f;
+       // lights[1].linear = 0.09f;
+      //  lights[1].quadratic = 0.032f;
 
         while (!glfwWindowShouldClose(window))
         {
@@ -233,6 +234,7 @@ int main()
             if (glfwGetKey(window, GLFW_KEY_F5) == GLFW_PRESS) debugView = 4;
             if (glfwGetKey(window, GLFW_KEY_F6) == GLFW_PRESS) debugView = 5;
             if (glfwGetKey(window, GLFW_KEY_F7) == GLFW_PRESS) debugView = 6;
+            if (glfwGetKey(window, GLFW_KEY_F8) == GLFW_PRESS) debugView = 7;
 
             if (framebufferWidth == 0 || framebufferHeight == 0)
             {
@@ -252,10 +254,14 @@ int main()
          //ScenePass
            // renderer.renderScenePass(scene, camera, directionalLight, lights, 2, lightSpaceMatrix);
 
-         //Geometry Pass
+         //GeometryPass
             renderer.renderGeometryPass(scene, camera);
 
-         //Deferred Lighting Pass
+         //SsaoPass
+            renderer.renderSSAOPass(debugQuad, camera);
+            renderer.renderSSAOBlurPass(debugQuad);
+
+         //DeferredLightingPass
             renderer.renderDeferredLightingPass(debugQuad, camera, directionalLight, lights, 2, lightSpaceMatrix, debugView);
 
          //ScreenPass

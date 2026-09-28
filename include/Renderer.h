@@ -3,6 +3,7 @@
 #include "Shader.h"
 #include "Light.h"
 #include <glm/glm.hpp>
+#include<array>
 
 class Scene;
 class Camera;
@@ -22,6 +23,8 @@ public:
     void resizeSceneFramebuffer(int width, int height);
     void renderScreenPass(Mesh& quad, int toneMappingMode, int debugView);
     void renderGeometryPass(const Scene& scene, Camera& camera);
+    void renderSSAOPass(Mesh& quad, Camera& camera);
+    void renderSSAOBlurPass(Mesh& quad);
     void renderDeferredLightingPass(Mesh& quad, Camera& camera, const DirectionalLight& directionalLight, const PointLight* pointLights, int pointLightCount, const glm::mat4& lightSpaceMatrix, int debugView);
 
     unsigned int getShadowMap() const;
@@ -32,6 +35,8 @@ private:
     Shader sceneShader;
     Shader screenShader;
     Shader geometryShader;
+    Shader ssaoShader;
+    Shader ssaoBlurShader;
     Shader deferredShader;
 
     unsigned int depthMapFBO = 0;
@@ -48,6 +53,12 @@ private:
     unsigned int gAlbedo = 0;
     unsigned int gMaterial = 0;
     unsigned int gDepth = 0;
+    unsigned int ssaoFBO = 0;
+    unsigned int ssaoTexture = 0;
+    unsigned int ssaoBlurFBO = 0;
+    unsigned int ssaoBlurTexture = 0;
+    std::array<glm::vec3,32> ssaoKernel{};
+    unsigned int ssaoNoiseTexture = 0;
 
     int framebufferWidth = 0;
     int framebufferHeight = 0;
@@ -55,4 +66,9 @@ private:
     void initShadowMap();
     void initSceneFramebuffer();
     void initGBuffer();
+    void initSSAOFramebuffer();
+    void initSSAOKernel();
+    void initSSAONoiseTexture();
+    void initSSAOBlur();
+  
 };

@@ -1,9 +1,10 @@
 #include"Model.h"
-
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>
-
 #include <iostream>
+#include <algorithm>
+#include <cctype>
+#include <filesystem>
 
 
 static glm::mat4 aiMatrixToGlm(const aiMatrix4x4& m)
@@ -18,7 +19,7 @@ static glm::mat4 aiMatrixToGlm(const aiMatrix4x4& m)
 	return result;
 }
 
-Model::Model(const std::string& path)
+Model::Model(const std::string& path, bool useDirectXNormals) : directXNormals(useDirectXNormals)
 {
 	defaultDiffuse = std::make_unique<Texture>(255, 255, 255);
 	defaultNormal = std::make_unique<Texture>(128, 128, 255);
@@ -30,6 +31,11 @@ Model::Model(const std::string& path)
 
 void Model::loadModel(const std::string& path)
 {
+	std::string suffix = std::filesystem::path(path).extension().string();
+	std::transform(suffix.begin(), suffix.end(), suffix.begin(),[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	
+	if (suffix == ".gltf" || suffix == ".glb") {loadGltf(path);if (loaded) return;std::cerr << "fastgltf failed, attempting Assimp fallback: " << path << '\n';}
+
 	Assimp::Importer importer;
 
 	const aiScene* scene = importer.ReadFile(path, aiProcess_Triangulate | aiProcess_GenSmoothNormals);
@@ -43,6 +49,8 @@ void Model::loadModel(const std::string& path)
 	directory = path.substr(0, path.find_last_of("/\\"));
 
 	processNode(scene->mRootNode, scene, glm::mat4(1.0f));
+
+	loaded = true;
 }
 
 void Model::processNode(aiNode* node, const aiScene* scene, const glm::mat4& parentTransform)
@@ -221,4 +229,9 @@ Texture* Model::loadTexture(const std::string& path, bool srgb)
 	loadedTextures.emplace(cacheKey, std::move(texture));
 
 	return texturePtr;
+}
+
+bool Model::isLoaded() const
+{
+	return loaded;
 }

@@ -12,17 +12,26 @@ uniform sampler2D normalMap;
 uniform sampler2D metallicMap;
 uniform sampler2D roughnessMap;
 uniform sampler2D aoMap;
+uniform vec4 baseColorFactor;
+uniform float metallicFactor;
+uniform float roughnessFactor;
+uniform float normalYSign;
+uniform int alphaMode;
+uniform float alphaCutoff;
 
 void main()
 {
-    vec3 albedo = texture(albedoMap, TexCoord).rgb;
+    vec4 baseColor = texture(albedoMap, TexCoord) * baseColorFactor;
+    if (alphaMode == 1 && baseColor.a < alphaCutoff) discard;
+    vec3 albedo = baseColor.rgb;
 
     vec3 tangentNormal = texture(normalMap, TexCoord).rgb;
     tangentNormal = tangentNormal * 2.0 - 1.0;
+    tangentNormal.y *= normalYSign;
     vec3 normal = normalize(TBN * tangentNormal);
 
-    float metallic = texture(metallicMap, TexCoord).b;
-    float roughness = texture(roughnessMap, TexCoord).g;
+    float metallic = texture(metallicMap, TexCoord).b * metallicFactor;
+    float roughness = texture(roughnessMap, TexCoord).g * roughnessFactor;
     float ao = texture(aoMap, TexCoord).r;
 
     gNormal = normal;
