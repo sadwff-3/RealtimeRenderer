@@ -69,8 +69,8 @@ int main(int argc, char** argv)
         std::cerr << "Failed to initialize GLFW\n";
         return -1;
     }
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     GLFWwindow* window = glfwCreateWindow(1280, 720, "Realtime Renderer", nullptr, nullptr);
 
@@ -116,7 +116,7 @@ int main(int argc, char** argv)
         Scene scene;
         Renderer renderer(framebufferWidth, framebufferHeight);
 
-        Model* livingRoom = assets.loadModel("assets/LivingRoom/living_room.obj");
+        Model* livingRoom = assets.loadModel("assets/Bistro/BistroExterior.gltf");
 
         if (livingRoom)
         {
@@ -124,10 +124,10 @@ int main(int argc, char** argv)
         }
         else
         {
-            std::cerr << "Failed to load Living Room\n";
+            std::cerr << "Failed to load Sponza\n";
         }
 
-
+        
 
 
         //debug
@@ -158,30 +158,39 @@ int main(int argc, char** argv)
         int debugView = 0;
         
         //Lights
-        PointLight lights[2];
-        DirectionalLight directionalLight;
+        
+        Light directionalLight;
+        directionalLight.type = LightType::Directional;
+        directionalLight.color = glm::vec3(1.0f);
+        directionalLight.intensity = 1.0f;
+        directionalLight.castShadow = true;
 
+        SceneObject& sun = scene.addLight("Directional Light", directionalLight);
+        sun.transform.rotation = glm::vec3(-29.0f, 59.0f, 0.0f);
 
-        directionalLight.direction = glm::normalize(glm::vec3(0.65f, -0.8f, -0.4f));
-        directionalLight.color = glm::vec3(1.0f, 0.97f, 0.92f);
-        directionalLight.intensity = 3.0f;
+        Light spotLight;
+        spotLight.type = LightType::Spot;
+        spotLight.color = glm::vec3(1.0f, 0.95f, 0.8f);
+        spotLight.intensity = 15.0f;
+        spotLight.range = 12.0f;
+        spotLight.innerAngle = 25.0f;
+        spotLight.outerAngle = 35.0f;
+        spotLight.castShadow = true;
 
+        SceneObject& spot = scene.addLight("Test Spotlight", spotLight);
+        spot.transform.position = glm::vec3(0.0f, 3.0f, 0.0f);
+        spot.transform.rotation = glm::vec3(-90.0f, 0.0f, 0.0f);
+      
+        Light pointLight;
+        pointLight.type = LightType::Point;
+        pointLight.color = glm::vec3(1.0f);
+        pointLight.intensity = 20.0f;
+        pointLight.range = 10.0f;
+        pointLight.castShadow = true;
 
-        //lights[0].position = glm::vec3(1.2f, 1.0f, 2.0f);
-        //lights[0].color = glm::vec3(1.0f, 1.0f, 1.0f);
-       // lights[0].intensity = 1.0f;
+        SceneObject& point = scene.addLight("Test Point Light", pointLight);
+        point.transform.position = glm::vec3(0.0f, 3.0f, 0.0f);
 
-       // lights[0].constant = 1.0f;
-     //   lights[0].linear = 0.09f;
-       // lights[0].quadratic = 0.032f;
-
-        //lights[1].position = glm::vec3(-2.0f, 1.0f, 1.0f);
-        //lights[1].color = glm::vec3(1.0f, 0.2f, 0.2f);
-        //lights[1].intensity = 0.7f;
-
-       // lights[1].constant = 1.0f;
-       // lights[1].linear = 0.09f;
-      //  lights[1].quadratic = 0.032f;
 
         while (!glfwWindowShouldClose(window))
         {
@@ -248,11 +257,14 @@ int main(int argc, char** argv)
                 framebufferResized = false;
             }
     
-         //ShadowPass
-            glm::mat4 lightSpaceMatrix = renderer.renderShadowPass(scene, directionalLight);
-            
-         //ScenePass
-           // renderer.renderScenePass(scene, camera, directionalLight, lights, 2, lightSpaceMatrix);
+         //DirectionalShadowPass
+            renderer.renderDirectionalShadowPass(scene);
+
+         //SpotShadowPass
+            renderer.renderSpotShadowPass(scene);
+
+         //PointShadowPass
+            renderer.renderPointShadowPass(scene);
 
          //GeometryPass
             renderer.renderGeometryPass(scene, camera);
@@ -262,7 +274,7 @@ int main(int argc, char** argv)
             renderer.renderSSAOBlurPass(debugQuad);
 
          //DeferredLightingPass
-            renderer.renderDeferredLightingPass(debugQuad, camera, directionalLight, lights, 2, lightSpaceMatrix, debugView);
+            renderer.renderDeferredLightingPass(debugQuad, camera, scene, debugView);
 
          //ScreenPass
             renderer.renderScreenPass(debugQuad, toneMappingMode, debugView);

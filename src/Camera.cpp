@@ -6,10 +6,12 @@ Camera::Camera(glm::vec3 position,glm::vec3 up,float yaw,float pitch): Position(
     updateCameraVectors();
 }
 
+
 glm::mat4 Camera::getViewMatrix() const
 {
     return glm::lookAt(Position,Position + Front,Up);
 }
+
 
 void Camera::processKeyboard(CameraMovement direction,float deltaTime)
 {
@@ -36,6 +38,7 @@ void Camera::processKeyboard(CameraMovement direction,float deltaTime)
     }
 }
 
+
 void Camera::processMouseMovement(float xoffset,float yoffset)
 {
     xoffset *= MouseSensitivity;
@@ -52,6 +55,7 @@ void Camera::processMouseMovement(float xoffset,float yoffset)
 
     updateCameraVectors();
 }
+
 
 void Camera::processMouseScroll(float yoffset)
 {

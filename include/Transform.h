@@ -10,5 +10,6 @@ public:
     glm::vec3 scale = glm::vec3(1.0f);
 
     glm::mat4 getMatrix() const;
+    glm::vec3 getForward() const;
 
 };

@@ -11,16 +11,20 @@
 #include <iostream>
 #include <algorithm>
 #include<random>
+#include<cmath>
 
-Renderer::Renderer(int width, int height) :shadowShader("shaders/shadow_depth.vert", "shaders/shadow_depth.frag"), sceneShader("shaders/pbr.vert", "shaders/pbr.frag"), screenShader("shaders/screen.vert", "shaders/screen.frag"), geometryShader("shaders/gbuffer.vert", "shaders/gbuffer.frag"), ssaoShader("shaders/screen.vert", "shaders/ssao.frag"), ssaoBlurShader("shaders/screen.vert", "shaders/ssao_blur.frag"), deferredShader("shaders/screen.vert", "shaders/deferred_lighting.frag"), framebufferWidth(width), framebufferHeight(height)
+
+Renderer::Renderer(int width, int height) :shadowShader("shaders/shadow_depth.vert", "shaders/shadow_depth.frag"), pointShadowShader("shaders/point_shadow.vert", "shaders/point_shadow.frag"), sceneShader("shaders/pbr.vert", "shaders/pbr.frag"), screenShader("shaders/screen.vert", "shaders/screen.frag"), geometryShader("shaders/gbuffer.vert", "shaders/gbuffer.frag"), ssaoShader("shaders/screen.vert", "shaders/ssao.frag"), ssaoBlurShader("shaders/screen.vert", "shaders/ssao_blur.frag"), deferredShader("shaders/screen.vert", "shaders/deferred_lighting.frag"), framebufferWidth(width), framebufferHeight(height)
 {
-	initShadowMap();
 	initSceneFramebuffer();
 	initGBuffer();
 	initSSAOFramebuffer();
 	initSSAOKernel();
 	initSSAONoiseTexture();
 	initSSAOBlur();
+	initDirectionalShadowMaps();
+	initSpotShadowMaps();
+	initPointShadowMaps();
 
 	ssaoShader.use();
 	ssaoShader.setInt("gDepth", 0);
@@ -35,11 +39,12 @@ Renderer::Renderer(int width, int height) :shadowShader("shaders/shadow_depth.ve
 	deferredShader.setInt("gAlbedo", 1);
 	deferredShader.setInt("gMaterial", 2);
 	deferredShader.setInt("gDepth", 3);
-	deferredShader.setInt("shadowMap", 4);
+	deferredShader.setInt("directionalShadowMaps", 4);
 	deferredShader.setInt("ssaoMap", 5);
+	deferredShader.setInt("spotShadowMaps", 6);
+	deferredShader.setInt("pointShadowMaps", 7);
 
-	sceneShader.use();
-	sceneShader.setInt("shadowMap", 2);
+	
 	screenShader.use();
 	screenShader.setInt("screenTexture", 0);
 	screenShader.setFloat("exposure", 1.0f);
@@ -116,33 +121,113 @@ Renderer::~Renderer()
 		glDeleteFramebuffers(1, &ssaoBlurFBO);
 	}
 
+	if (spotShadowArray != 0)
+	{
+		glDeleteTextures(1, &spotShadowArray);
+	}
+
+	if (spotShadowFBO != 0)
+	{
+		glDeleteFramebuffers(1, &spotShadowFBO);
+	}
+	
+	if (pointShadowArray != 0)
+	{
+		glDeleteTextures(1, &pointShadowArray);
+	}
+
+	if (pointShadowFBO != 0)
+	{
+		glDeleteFramebuffers(1, &pointShadowFBO);
+	}
 }
 
-void Renderer::initShadowMap()
+void Renderer::initDirectionalShadowMaps()
 {
-	glGenFramebuffers(1, &depthMapFBO);
+	glGenFramebuffers(1, &directionalShadowFBO);
+	glGenTextures(1, &directionalShadowArray);
 
-	glGenTextures(1, &depthMap);
-	glBindTexture(GL_TEXTURE_2D, depthMap);
+	glBindTexture(GL_TEXTURE_2D_ARRAY, directionalShadowArray);
 
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+	glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT24, DIRECTIONAL_SHADOW_SIZE, DIRECTIONAL_SHADOW_SIZE, MAX_DIRECTIONAL_SHADOWS, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
 
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
 
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+	const float border[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+	glTexParameterfv(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BORDER_COLOR, border);
 
-	float borderColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
-	glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
-
-	glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthMap, 0);
+	glBindFramebuffer(GL_FRAMEBUFFER, directionalShadowFBO);
+	glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, directionalShadowArray, 0, 0);
 
 	glDrawBuffer(GL_NONE);
 	glReadBuffer(GL_NONE);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+}
+
+
+void Renderer::initSpotShadowMaps()
+{
+	glGenFramebuffers(1, &spotShadowFBO);
+	glGenTextures(1, &spotShadowArray);
+
+	glBindTexture(GL_TEXTURE_2D_ARRAY, spotShadowArray);
+
+	glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT24, SPOT_SHADOW_SIZE, SPOT_SHADOW_SIZE, MAX_SPOT_SHADOWS, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+
+	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+
+	const float border[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+	glTexParameterfv(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BORDER_COLOR, border);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, spotShadowFBO);
+	glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, spotShadowArray, 0, 0);
+
+	glDrawBuffer(GL_NONE);
+	glReadBuffer(GL_NONE);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+
+}
+
+
+void Renderer::initPointShadowMaps()
+{
+	glGenFramebuffers(1, &pointShadowFBO);
+
+	glGenTextures(1, &pointShadowArray);
+
+	glBindTexture(GL_TEXTURE_CUBE_MAP_ARRAY, pointShadowArray);
+
+	glTexImage3D(GL_TEXTURE_CUBE_MAP_ARRAY, 0 ,GL_DEPTH_COMPONENT24, POINT_SHADOW_SIZE, POINT_SHADOW_SIZE, 6 * MAX_POINT_SHADOWS, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+
+	glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+	glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, pointShadowFBO);
+
+	glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, pointShadowArray, 0, 0);
+
+	glDrawBuffer(GL_NONE);
+	glReadBuffer(GL_NONE);
+
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+		std::cerr << "Point shadow framebuffer is incomplete!" << std::endl;
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glBindTexture(GL_TEXTURE_CUBE_MAP_ARRAY, 0);
 }
 
 
@@ -339,37 +424,210 @@ void Renderer::initSSAONoiseTexture()
 }
 
 
-glm::mat4 Renderer::renderShadowPass(const Scene& scene, const DirectionalLight& light)
+void Renderer::renderDirectionalShadowPass(const Scene& scene)
 {
-	glm::vec3 lightPos = -light.direction * 20.0f;
-
-	glm::mat4 lightProjection = glm::ortho(-15.0f, 15.0f, -15.0f, 15.0f, 0.1f, 50.0f);
-	glm::mat4 lightView = glm::lookAt(lightPos, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-	glm::mat4 lightSpaceMatrix = lightProjection * lightView;
-
-	glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
-	glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
-	glClear(GL_DEPTH_BUFFER_BIT);
+	glViewport(0, 0, DIRECTIONAL_SHADOW_SIZE, DIRECTIONAL_SHADOW_SIZE);
+	glBindFramebuffer(GL_FRAMEBUFFER, directionalShadowFBO);
 
 	shadowShader.use();
-	shadowShader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
 
-	for (const auto& object : scene.getObjects())
+	directionalShadowCount = 0;
+
+	for (const SceneObject* lightObject : scene.getLights())
 	{
-		if (object->model == nullptr)
-		{
+		if (!lightObject->light.has_value())
 			continue;
+
+		const Light& light = lightObject->light.value();
+
+		if (light.type != LightType::Directional)
+			continue;
+
+		if (!light.castShadow)
+			continue;
+
+		if (directionalShadowCount >= MAX_DIRECTIONAL_SHADOWS)
+			break;
+
+		glm::vec3 direction = lightObject->transform.getForward();
+
+		glm::vec3 up(0.0f, 1.0f, 0.0f);
+
+		if (std::abs(glm::dot(direction, up)) > 0.99f)
+			up = glm::vec3(0.0f, 0.0f, 1.0f);
+
+		glm::vec3 lightPos = -direction * 20.0f;
+
+		glm::mat4 lightProjection = glm::ortho(-15.0f, 15.0f, -15.0f, 15.0f, 0.1f, 50.0f);
+
+		glm::mat4 lightView = glm::lookAt(lightPos, lightPos + direction, up);
+
+		glm::mat4 lightSpaceMatrix = lightProjection * lightView;
+
+		directionalLightSpaceMatrices[directionalShadowCount] = lightSpaceMatrix;
+
+		glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, directionalShadowArray, 0, directionalShadowCount);
+
+		glClear(GL_DEPTH_BUFFER_BIT);
+
+		shadowShader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
+
+		for (const auto& object : scene.getObjects())
+		{
+			if (object->model == nullptr)
+				continue;
+
+			glm::mat4 model = object->transform.getMatrix();
+
+			shadowShader.setMat4("model", model);
+			object->model->drawGeometry();
 		}
 
-		glm::mat4 model = object->transform.getMatrix();
-
-		shadowShader.setMat4("model", model);
-		object->model->draw(shadowShader);
+		++directionalShadowCount;
 	}
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glViewport(0, 0, framebufferWidth, framebufferHeight);
+}
 
-	return lightSpaceMatrix;
+
+void Renderer::renderSpotShadowPass(const Scene& scene)
+{
+	glViewport(0, 0, SPOT_SHADOW_SIZE, SPOT_SHADOW_SIZE);
+	glBindFramebuffer(GL_FRAMEBUFFER, spotShadowFBO);
+
+	shadowShader.use();
+
+	spotShadowCount = 0;
+	for (const SceneObject* lightObject : scene.getLights())
+	{
+		if (!lightObject->light.has_value())
+			continue;
+
+		const Light& light = lightObject->light.value();
+
+		if (light.type != LightType::Spot)
+			continue;
+
+		if (!light.castShadow)
+			continue;
+
+		if (spotShadowCount >= MAX_SPOT_SHADOWS)
+			break;
+
+		glm::vec3 position = lightObject->transform.position;
+		glm::vec3 direction = lightObject->transform.getForward();
+		
+		glm::vec3 up(0.0f, 1.0f, 0.0f);
+
+		if (std::abs(glm::dot(direction, up)) > 0.99f)
+			up = glm::vec3(0.0f, 0.0f, 1.0f);
+
+		glm::mat4 lightProjection = glm::perspective(glm::radians(light.outerAngle * 2.0f), 1.0f, 0.1f, light.range);
+
+		glm::mat4 lightView = glm::lookAt(position, position + direction, up);
+
+		glm::mat4 lightSpaceMatrix = lightProjection * lightView;
+
+		spotLightSpaceMatrices[spotShadowCount] = lightSpaceMatrix;
+
+		glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, spotShadowArray, 0, spotShadowCount);
+
+		glClear(GL_DEPTH_BUFFER_BIT);
+
+		shadowShader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
+
+		for (const auto& object : scene.getObjects())
+		{
+			if (object->model == nullptr)
+				continue;
+
+			glm::mat4 model = object->transform.getMatrix();
+
+			shadowShader.setMat4("model", model);
+			object->model->drawGeometry();
+		}
+
+		++spotShadowCount;
+	}
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glViewport(0, 0, framebufferWidth, framebufferHeight);
+}
+
+
+void Renderer::renderPointShadowPass(const Scene& scene)
+{
+	pointShadowCount = 0;
+
+	glViewport(0, 0, POINT_SHADOW_SIZE, POINT_SHADOW_SIZE);
+	glBindFramebuffer(GL_FRAMEBUFFER, pointShadowFBO);
+
+	pointShadowShader.use();
+
+	for (const SceneObject* object : scene.getLights())
+	{
+		if (!object->light.has_value())
+			continue;
+
+		const Light& light = object->light.value();
+
+		if (light.type != LightType::Point)
+			continue;
+
+		if (!light.castShadow)
+			continue;
+
+		if (pointShadowCount >= MAX_POINT_SHADOWS)
+			break;
+
+		glm::vec3 lightPos = object->transform.position;
+		float farPlane = light.range;
+
+		pointShadowShader.setVec3("lightPos", lightPos);
+		pointShadowShader.setFloat("farPlane", farPlane);
+
+		glm::mat4 projection = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, farPlane);
+
+		glm::mat4 shadowViews[6] =
+		{
+			glm::lookAt(lightPos, lightPos + glm::vec3(1.0f,  0.0f,  0.0f), glm::vec3(0.0f, -1.0f,  0.0f)),
+			glm::lookAt(lightPos, lightPos + glm::vec3(-1.0f,  0.0f,  0.0f), glm::vec3(0.0f, -1.0f,  0.0f)),
+			glm::lookAt(lightPos, lightPos + glm::vec3(0.0f,  1.0f,  0.0f), glm::vec3(0.0f,  0.0f,  1.0f)),
+			glm::lookAt(lightPos, lightPos + glm::vec3(0.0f, -1.0f,  0.0f), glm::vec3(0.0f,  0.0f, -1.0f)),
+			glm::lookAt(lightPos, lightPos + glm::vec3(0.0f,  0.0f,  1.0f), glm::vec3(0.0f, -1.0f,  0.0f)),
+			glm::lookAt(lightPos, lightPos + glm::vec3(0.0f,  0.0f, -1.0f), glm::vec3(0.0f, -1.0f,  0.0f))
+		};
+
+		for (int face = 0; face < 6; ++face)
+		{
+			int layer = pointShadowCount * 6 + face;
+
+			glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, pointShadowArray, 0, layer);
+
+			glClear(GL_DEPTH_BUFFER_BIT);
+
+			glm::mat4 lightSpaceMatrix = projection * shadowViews[face];
+
+			pointShadowShader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
+
+			for (const auto& object : scene.getObjects())
+			{
+				if (object->model == nullptr)
+					continue;
+
+				glm::mat4 model = object->transform.getMatrix();
+
+				pointShadowShader.setMat4("model", model);
+				object->model->drawGeometry();
+			}
+		}
+
+		++pointShadowCount;
+	}
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glViewport(0, 0, framebufferWidth, framebufferHeight);
 }
 
 
@@ -465,7 +723,7 @@ void Renderer::renderSSAOBlurPass(Mesh& quad)
 }
 
 
-void Renderer::renderDeferredLightingPass(Mesh& quad, Camera& camera, const DirectionalLight& directionalLight, const PointLight* pointLights, int pointLightCount, const glm::mat4& lightSpaceMatrix, int debugView)
+void Renderer::renderDeferredLightingPass(Mesh& quad, Camera& camera, const Scene& scene, int debugView)
 {
 	glBindFramebuffer(GL_FRAMEBUFFER, sceneFBO);
 	glViewport(0, 0, framebufferWidth, framebufferHeight);
@@ -489,10 +747,16 @@ void Renderer::renderDeferredLightingPass(Mesh& quad, Camera& camera, const Dire
 	glBindTexture(GL_TEXTURE_2D, gDepth);
 
 	glActiveTexture(GL_TEXTURE4);
-	glBindTexture(GL_TEXTURE_2D, depthMap);
+	glBindTexture(GL_TEXTURE_2D_ARRAY, directionalShadowArray);
 
 	glActiveTexture(GL_TEXTURE5);
 	glBindTexture(GL_TEXTURE_2D, ssaoBlurTexture);
+
+	glActiveTexture(GL_TEXTURE6);
+	glBindTexture(GL_TEXTURE_2D_ARRAY, spotShadowArray);
+
+	glActiveTexture(GL_TEXTURE7);
+	glBindTexture(GL_TEXTURE_CUBE_MAP_ARRAY, pointShadowArray);
 
 
 	glm::mat4 view = camera.getViewMatrix();
@@ -501,29 +765,144 @@ void Renderer::renderDeferredLightingPass(Mesh& quad, Camera& camera, const Dire
 	glm::mat4 inverseViewProjection = glm::inverse(projection * view);
 
 	deferredShader.setMat4("inverseViewProjection", inverseViewProjection);
-	deferredShader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
 	deferredShader.setVec3("viewPos", camera.Position);
 
-	deferredShader.setVec3("directionalLight.direction", directionalLight.direction);
-	deferredShader.setVec3("directionalLight.color", directionalLight.color);
-	deferredShader.setFloat("directionalLight.intensity", directionalLight.intensity);
 	
 	deferredShader.setInt("debugView", debugView);
 
-	int count = std::min(pointLightCount, 4);
+
+	int directionalCount = 0;
+	int directionalShadowIndex = 0;
+
+	for (const SceneObject* object : scene.getLights())
+	{
+		if (!object->light.has_value())
+			continue;
+
+		const Light& light = object->light.value();
+
+		if (light.type != LightType::Directional)
+			continue;
+
+		if (directionalCount >= MAX_DIRECTIONAL_SHADOWS)
+			break;
+
+		std::string base =
+			"directionalLights[" + std::to_string(directionalCount) + "]";
+
+		deferredShader.setVec3(base + ".direction", object->transform.getForward());
+		deferredShader.setVec3(base + ".color", light.color);
+		deferredShader.setFloat(base + ".intensity", light.intensity);
+
+		int shadowLayer = -1;
+
+		if (light.castShadow && directionalShadowIndex < directionalShadowCount)
+		{
+			shadowLayer = directionalShadowIndex;
+
+			deferredShader.setMat4(
+				base + ".lightSpaceMatrix",
+				directionalLightSpaceMatrices[directionalShadowIndex]
+			);
+
+			++directionalShadowIndex;
+		}
+
+		deferredShader.setInt(base + ".shadowLayer", shadowLayer);
+
+		++directionalCount;
+	}
+
+	deferredShader.setInt("directionalLightCount", directionalCount);
+
+
+	int count = 0;
+	int pointShadowIndex = 0;
+	for (const auto& object : scene.getLights())
+	{
+		if (!object->light.has_value())
+			continue;
+
+		const Light& light = object->light.value();
+
+		if (light.type != LightType::Point)
+			continue;
+
+		if (count >= 4)
+			break;
+
+		std::string base = "pointLights[" + std::to_string(count) + "]";
+
+		deferredShader.setVec3(base + ".position", object->transform.position);
+		deferredShader.setVec3(base + ".color", light.color);
+		deferredShader.setFloat(base + ".intensity", light.intensity);
+
+		deferredShader.setFloat(base + ".constant", 1.0f);
+		deferredShader.setFloat(base + ".linear", 0.09f);
+		deferredShader.setFloat(base + ".quadratic", 0.032f);
+
+		int shadowLayer = -1;
+
+		if (light.castShadow && pointShadowIndex < pointShadowCount)
+		{
+			shadowLayer = pointShadowIndex;
+			++pointShadowIndex;
+		}
+
+		deferredShader.setInt(base + ".shadowLayer", shadowLayer);
+		deferredShader.setFloat(base + ".farPlane", light.range);
+
+		++count;
+	}
 	deferredShader.setInt("pointLightCount", count);
 
-	for (int i = 0; i < count; ++i)
-	{
-		std::string base = "pointLights[" + std::to_string(i) + "]";
 
-		deferredShader.setVec3(base + ".position", pointLights[i].position);
-		deferredShader.setVec3(base + ".color", pointLights[i].color);
-		deferredShader.setFloat(base + ".intensity", pointLights[i].intensity);
-		deferredShader.setFloat(base + ".constant", pointLights[i].constant);
-		deferredShader.setFloat(base + ".linear", pointLights[i].linear);
-		deferredShader.setFloat(base + ".quadratic", pointLights[i].quadratic);
+	int spotCount = 0;
+	int shadowIndex = 0;
+	for (const SceneObject* object : scene.getLights())
+	{
+		if (!object->light.has_value())
+			continue;
+
+		const Light& light = object->light.value();
+		if (light.type != LightType::Spot)
+			continue;
+
+		if (spotCount >= 10)
+			break;
+
+		std::string base = "spotLights[" + std::to_string(spotCount) + "]";
+
+		deferredShader.setVec3(base + ".position", object->transform.position);
+		deferredShader.setVec3(base + ".direction", object->transform.getForward());
+		deferredShader.setVec3(base + ".color", light.color);
+		deferredShader.setFloat(base + ".intensity", light.intensity);
+		deferredShader.setFloat(base + ".range", light.range);
+
+		float inner = glm::cos(glm::radians(light.innerAngle));
+		float outer = glm::cos(glm::radians(light.outerAngle));
+
+		deferredShader.setFloat(base + ".innerCutoff", inner);
+		deferredShader.setFloat(base + ".outerCutoff", outer);
+
+		int layer = -1;
+
+		if (light.castShadow && shadowIndex < spotShadowCount)
+		{
+			layer = shadowIndex;
+
+			deferredShader.setMat4(base + ".lightSpaceMatrix", spotLightSpaceMatrices[shadowIndex]);
+
+			++shadowIndex;
+		}
+		
+
+		deferredShader.setInt(base + ".shadowLayer", layer);
+
+		++spotCount;
 	}
+
+	deferredShader.setInt("spotLightCount", spotCount);
 
 	quad.draw();
 
@@ -547,19 +926,6 @@ void Renderer::renderScenePass(const Scene& scene, Camera& camera, const Directi
 	sceneShader.setVec3("directionalLight.color", directionalLight.color);
 	sceneShader.setFloat("directionalLight.intensity", directionalLight.intensity);
 
-	sceneShader.setInt("pointLightCount", pointLightCount);
-
-	for (int i = 0; i < pointLightCount; ++i)
-	{
-		std::string base = "pointLights[" + std::to_string(i) + "]";
-
-		sceneShader.setVec3((base + ".position").c_str(), pointLights[i].position);
-		sceneShader.setVec3((base + ".color").c_str(), pointLights[i].color);
-		sceneShader.setFloat((base + ".intensity").c_str(), pointLights[i].intensity);
-		sceneShader.setFloat(base + ".constant", pointLights[i].constant);
-		sceneShader.setFloat(base + ".linear", pointLights[i].linear);
-		sceneShader.setFloat(base + ".quadratic", pointLights[i].quadratic);
-	}
 
 	sceneShader.setVec3("viewPos", camera.Position);
 

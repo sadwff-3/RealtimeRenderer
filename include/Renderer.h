@@ -15,7 +15,10 @@ public:
     Renderer(int width, int height);
     ~Renderer();
 
-    glm::mat4 renderShadowPass(const Scene& scene, const DirectionalLight& light);
+    glm::mat4 renderShadowPass(const Scene& scene);
+    void renderDirectionalShadowPass(const Scene& scene);
+    void renderSpotShadowPass(const Scene&scene);
+    void renderPointShadowPass(const Scene& scene);
 
     void renderScenePass(const Scene& scene, Camera& camera, const DirectionalLight& directionalLight, const PointLight* poinLights, int pointLightCount, const glm::mat4& lightSpaceMatrix);
 
@@ -25,13 +28,14 @@ public:
     void renderGeometryPass(const Scene& scene, Camera& camera);
     void renderSSAOPass(Mesh& quad, Camera& camera);
     void renderSSAOBlurPass(Mesh& quad);
-    void renderDeferredLightingPass(Mesh& quad, Camera& camera, const DirectionalLight& directionalLight, const PointLight* pointLights, int pointLightCount, const glm::mat4& lightSpaceMatrix, int debugView);
+    void renderDeferredLightingPass(Mesh& quad, Camera& camera, const Scene& scene, int debugView);
 
     unsigned int getShadowMap() const;
     unsigned int getSceneColorTexture() const;
 
 private:
     Shader shadowShader;
+    Shader pointShadowShader;
     Shader sceneShader;
     Shader screenShader;
     Shader geometryShader;
@@ -42,8 +46,12 @@ private:
     unsigned int depthMapFBO = 0;
     unsigned int depthMap = 0;
 
-    static constexpr unsigned int SHADOW_WIDTH = 2048;
-    static constexpr unsigned int SHADOW_HEIGHT = 2048;
+    static constexpr int DIRECTIONAL_SHADOW_SIZE = 2048;
+    static constexpr int MAX_DIRECTIONAL_SHADOWS = 4;
+    static constexpr int POINT_SHADOW_SIZE = 512;
+    static constexpr int MAX_POINT_SHADOWS = 4;
+    static constexpr int SPOT_SHADOW_SIZE = 1024;
+    static constexpr int MAX_SPOT_SHADOWS = 10;
 
     unsigned int sceneFBO = 0;
     unsigned int sceneColorTexture = 0;
@@ -59,16 +67,32 @@ private:
     unsigned int ssaoBlurTexture = 0;
     std::array<glm::vec3,32> ssaoKernel{};
     unsigned int ssaoNoiseTexture = 0;
+    unsigned int directionalShadowFBO = 0;
+    unsigned int directionalShadowArray = 0;
+    unsigned int spotShadowFBO = 0;
+    unsigned int spotShadowArray = 0;
+    unsigned int pointShadowFBO = 0;
+    unsigned int pointShadowArray = 0;
+
+    std::array<glm::mat4, MAX_SPOT_SHADOWS> spotLightSpaceMatrices{};
+    std::array<glm::mat4, MAX_DIRECTIONAL_SHADOWS> directionalLightSpaceMatrices{};
+    
+    int directionalShadowCount = 0;
+    int spotShadowCount = 0;
+    int pointShadowCount = 0;
 
     int framebufferWidth = 0;
     int framebufferHeight = 0;
 
-    void initShadowMap();
+  
     void initSceneFramebuffer();
     void initGBuffer();
     void initSSAOFramebuffer();
     void initSSAOKernel();
     void initSSAONoiseTexture();
     void initSSAOBlur();
+    void initDirectionalShadowMaps();
+    void initSpotShadowMaps();
+    void initPointShadowMaps();
   
 };

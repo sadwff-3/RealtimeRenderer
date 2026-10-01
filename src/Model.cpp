@@ -212,6 +212,14 @@ void Model::draw(Shader& shader) const
 	}
 }
 
+void Model::drawGeometry() const
+{
+	for (const auto& mesh : meshes)
+	{
+		mesh.draw();
+	}
+}
+
 Texture* Model::loadTexture(const std::string& path, bool srgb)
 {
 	std::string cacheKey = path + (srgb ? "_srgb" : "_linear");

@@ -6,6 +6,7 @@ Material::Material(Texture* albedoTexture, Texture* normalTexture, Texture* mata
 
 }
 
+
 void Material::bind(Shader& shader) const
 {
 	shader.use();

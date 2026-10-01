@@ -19,6 +19,7 @@ public:
     explicit Model(const std::string& path, bool directXNormals = false);
 
     void draw(Shader& shader) const;
+    void drawGeometry() const;
 
     bool isLoaded() const;
 

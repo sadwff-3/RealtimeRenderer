@@ -149,7 +149,7 @@ void Model::loadGltf(const std::string& path) {
     fastgltf::Asset asset = std::move(parsed.get());
     const bool bistroPacking = filePath.stem().string().starts_with("Bistro");
 
-    // NEW：glTF 纹理加载及缓存
+    // NEW??glTF ?????????????
     auto loadGltfTexture = [&](std::size_t textureIndex, bool srgb) -> Texture* {
         if (textureIndex >= asset.textures.size()) return nullptr;
 
@@ -225,7 +225,7 @@ void Model::loadGltf(const std::string& path) {
         return result;
         };
 
-    // NEW：glTF 材质转换
+    // NEW??glTF ???????
     auto makeMaterial = [&](const auto& index) -> Material {
         Texture* color = defaultDiffuse.get();
         Texture* normal = defaultNormal.get();
@@ -254,7 +254,7 @@ void Model::loadGltf(const std::string& path) {
             if (auto* tex = loadGltfTexture(m.occlusionTexture->textureIndex, false)) ao = tex;
         }
 
-        // Bistro 特殊 ORM 布局；不是通用 glTF 材质语义
+        // Bistro ???? ORM ???????????? glTF ????????
         if (bistroPacking && !m.pbrData.metallicRoughnessTexture && m.specular && m.specular->specularTexture) {
             if (auto* packed = loadGltfTexture(m.specular->specularTexture->textureIndex, false)) {
                 mr = packed;
@@ -275,7 +275,7 @@ void Model::loadGltf(const std::string& path) {
         return out;
         };
 
-    // NEW：场景及 Mesh 转换
+    // NEW???????? Mesh ???
     if (asset.scenes.empty()) {
         std::cerr << "fastgltf: model has no scene\n";
         return;
@@ -302,52 +302,109 @@ void Model::loadGltf(const std::string& path) {
 
                 const auto* positions = primitive.findAttribute("POSITION");
 
-                if (!positions) {
+                if (!positions || positions->accessorIndex >= asset.accessors.size()) {
+                    std::cerr << "glTF primitive skipped: missing/invalid POSITION accessor\n";
                     ++skipped;
                     continue;
                 }
 
                 const auto& positionAccessor = asset.accessors[positions->accessorIndex];
+
+                if (positionAccessor.type != fastgltf::AccessorType::Vec3) {
+                    std::cerr << "glTF primitive skipped: POSITION accessor is not VEC3\n";
+                    ++skipped;
+                    continue;
+                }
+
                 std::vector<Vertex> vertices(positionAccessor.count);
 
                 fastgltf::iterateAccessorWithIndex<glm::vec3>(
                     asset, positionAccessor,
                     [&](const glm::vec3& pos, std::size_t i) {
-                        vertices[i].position = glm::vec3(transform * glm::vec4(pos, 1.0f));
+                        if (i < vertices.size()) {
+                            vertices[i].position = glm::vec3(transform * glm::vec4(pos, 1.0f));
+                        }
                     }
                 );
 
-                if (const auto* normals = primitive.findAttribute("NORMAL")) {
-                    fastgltf::iterateAccessorWithIndex<glm::vec3>(
-                        asset, asset.accessors[normals->accessorIndex],
-                        [&](const glm::vec3& normal, std::size_t i) {
-                            vertices[i].normal = glm::normalize(normalMatrix * normal);
-                        }
-                    );
+                for (auto& v : vertices) {
+                    v.normal = glm::vec3(0.0f, 1.0f, 0.0f);
+                    v.texCoord = glm::vec2(0.0f);
                 }
-                else {
-                    for (auto& v : vertices) v.normal = glm::vec3(0, 1, 0);
+
+                if (const auto* normals = primitive.findAttribute("NORMAL")) {
+                    if (normals->accessorIndex < asset.accessors.size()) {
+                        const auto& normalAccessor = asset.accessors[normals->accessorIndex];
+
+                        if (normalAccessor.type == fastgltf::AccessorType::Vec3 &&
+                            normalAccessor.count == vertices.size()) {
+                            fastgltf::iterateAccessorWithIndex<glm::vec3>(
+                                asset, normalAccessor,
+                                [&](const glm::vec3& normal, std::size_t i) {
+                                    if (i < vertices.size()) {
+                                        vertices[i].normal = glm::normalize(normalMatrix * normal);
+                                    }
+                                }
+                            );
+                        }
+                        else {
+                            std::cerr << "glTF NORMAL accessor mismatch; using default normals\n";
+                        }
+                    }
+                    else {
+                        std::cerr << "glTF NORMAL accessor index out of range; using default normals\n";
+                    }
                 }
 
                 if (const auto* uv = primitive.findAttribute("TEXCOORD_0")) {
-                    fastgltf::iterateAccessorWithIndex<glm::vec2>(
-                        asset, asset.accessors[uv->accessorIndex],
-                        [&](const glm::vec2& texCoord, std::size_t i) {
-                            vertices[i].texCoord = texCoord;
+                    if (uv->accessorIndex < asset.accessors.size()) {
+                        const auto& uvAccessor = asset.accessors[uv->accessorIndex];
+
+                        if (uvAccessor.type == fastgltf::AccessorType::Vec2 &&
+                            uvAccessor.count == vertices.size()) {
+                            fastgltf::iterateAccessorWithIndex<glm::vec2>(
+                                asset, uvAccessor,
+                                [&](const glm::vec2& texCoord, std::size_t i) {
+                                    if (i < vertices.size()) {
+                                        vertices[i].texCoord = texCoord;
+                                    }
+                                }
+                            );
                         }
-                    );
+                        else {
+                            std::cerr << "glTF TEXCOORD_0 accessor mismatch; using default UVs\n";
+                        }
+                    }
+                    else {
+                        std::cerr << "glTF TEXCOORD_0 accessor index out of range; using default UVs\n";
+                    }
                 }
 
                 std::vector<unsigned int> indices;
 
                 if (primitive.indicesAccessor) {
+                    if (*primitive.indicesAccessor >= asset.accessors.size()) {
+                        std::cerr << "glTF primitive skipped: index accessor out of range\n";
+                        ++skipped;
+                        continue;
+                    }
+
                     const auto& accessor = asset.accessors[*primitive.indicesAccessor];
+
+                    if (accessor.type != fastgltf::AccessorType::Scalar) {
+                        std::cerr << "glTF primitive skipped: index accessor is not SCALAR\n";
+                        ++skipped;
+                        continue;
+                    }
+
                     indices.resize(accessor.count);
 
                     fastgltf::iterateAccessorWithIndex<std::uint32_t>(
                         asset, accessor,
                         [&](std::uint32_t idx, std::size_t i) {
-                            indices[i] = idx;
+                            if (i < indices.size()) {
+                                indices[i] = idx;
+                            }
                         }
                     );
                 }
@@ -359,10 +416,25 @@ void Model::loadGltf(const std::string& path) {
                     }
                 }
 
-                if (indices.size() < 3) continue;
+                if (indices.size() < 3) {
+                    ++skipped;
+                    continue;
+                }
 
-                meshMaterials.push_back(makeMaterial(primitive.materialIndex));  
-                
+                const auto maxIndex = *std::max_element(indices.begin(), indices.end());
+
+                if (maxIndex >= vertices.size()) {
+                    std::cerr << "glTF primitive skipped: index "
+                        << maxIndex
+                        << " exceeds vertex count "
+                        << vertices.size()
+                        << '\n';
+                    ++skipped;
+                    continue;
+                }
+
+                meshMaterials.push_back(makeMaterial(primitive.materialIndex));
+
                 meshes.emplace_back(vertices, indices);
             }
         }
@@ -375,3 +447,4 @@ void Model::loadGltf(const std::string& path) {
         << " distinct GPU textures; skipped " << skipped
         << " unsupported primitives\n";
 }
+
