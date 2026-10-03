@@ -10,6 +10,7 @@
 #include"Scene.h"
 #include"AssetManager.h"
 #include"Renderer.h"
+#include"EnvironmentMap.h"
 
 #include<glad/gl.h>
 #include<GLFW/glfw3.h>
@@ -115,6 +116,16 @@ int main(int argc, char** argv)
         AssetManager assets;
         Scene scene;
         Renderer renderer(framebufferWidth, framebufferHeight);
+        EnvironmentMap environmentMap;
+        Texture testHDR("assets/apartment/cayley_interior_4k.hdr");
+
+        if (testHDR.valid())
+        {
+            environmentMap.generate(testHDR);
+            environmentMap.generateIrradiance();
+            environmentMap.generatePrefilter();
+            environmentMap.generateBRDFLUT();
+        }
 
         Model* livingRoom = assets.loadModel("assets/Bistro/BistroExterior.gltf");
 
@@ -274,7 +285,7 @@ int main(int argc, char** argv)
             renderer.renderSSAOBlurPass(debugQuad);
 
          //DeferredLightingPass
-            renderer.renderDeferredLightingPass(debugQuad, camera, scene, debugView);
+            renderer.renderDeferredLightingPass(debugQuad, camera, scene, debugView, environmentMap.getCubemap(), environmentMap.getIrradianceMap(), environmentMap.getPrefilterMap(), environmentMap.getBRDFLUT());
 
          //ScreenPass
             renderer.renderScreenPass(debugQuad, toneMappingMode, debugView);

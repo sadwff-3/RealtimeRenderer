@@ -11,6 +11,10 @@ uniform sampler2D ssaoMap;
 uniform sampler2DArray directionalShadowMaps;
 uniform sampler2DArray spotShadowMaps;
 uniform samplerCubeArray pointShadowMaps;
+uniform samplerCube environmentMap;
+uniform samplerCube irradianceMap;
+uniform samplerCube prefilterMap;
+uniform sampler2D brdfLUT;
 
 uniform mat4 inverseViewProjection;
 uniform vec3 viewPos;
@@ -211,6 +215,11 @@ vec3 fresnelSchlick(float cosTheta, vec3 F0)
     return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
 }
 
+vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
+{
+    return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+}
+
 float distributionGGX(vec3 N, vec3 H, float roughness)
 {
     float a = roughness * roughness;
@@ -296,7 +305,18 @@ void main()
 
     if(depth >= 1.0)
     {
-        FragColor = vec4(0.1, 0.2, 0.3, 1.0);
+        vec2 ndc = TexCoord * 2.0 - 1.0;
+
+        vec4 worldPos = inverseViewProjection * vec4(ndc, 1.0, 1.0);
+
+        worldPos /= worldPos.w;
+
+        vec3 viewDirection = normalize(worldPos.xyz - viewPos);
+
+        vec3 environmentColor = texture(environmentMap, viewDirection).rgb;
+
+        FragColor = vec4(environmentColor, 1.0);
+
         return;
     }
 
@@ -347,7 +367,30 @@ void main()
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
 
     float ssao = texture(ssaoMap, TexCoord).r;
-    vec3 ambient = vec3(0.12) * albedo * ao * ssao;
+
+    float NdotV = max(dot(N, V), 0.0);
+
+    vec3 FIBL = fresnelSchlickRoughness(NdotV, F0, roughness);
+
+    vec3 kSIBL = FIBL;
+
+    vec3 kDIBL = (vec3(1.0) - kSIBL) * (1.0 - metallic);
+
+    vec3 irradiance = texture(irradianceMap, N).rgb;
+
+    vec3 diffuseIBL = irradiance * albedo;
+
+    vec3 R = reflect(-V, N);
+
+    const float MAX_REFLECTION_LOD = 4.0;
+
+    vec3 prefilteredColor = textureLod(prefilterMap, R, roughness * MAX_REFLECTION_LOD).rgb;
+
+    vec2 brdf = texture(brdfLUT, vec2(NdotV, roughness)).rg;
+
+    vec3 specularIBL = prefilteredColor * (FIBL * brdf.x + brdf.y);
+
+    vec3 ambient = (kDIBL * diffuseIBL + specularIBL) * ao * ssao;
 
     vec3 lighting = ambient;
 

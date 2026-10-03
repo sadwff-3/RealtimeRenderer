@@ -65,9 +65,20 @@ Texture::Texture(const char* path, bool srgb) {
     std::transform(suffix.begin(), suffix.end(), suffix.begin(),
         [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
-    const bool ok = suffix == ".ktx2"
-        ? loadKtx2(bytes.data(), bytes.size())
-        : loadImage(bytes.data(), bytes.size(), srgb, true);
+    bool ok = false;
+
+    if (suffix == ".ktx2")
+    {
+        ok = loadKtx2(bytes.data(), bytes.size());
+    }
+    else if (suffix == ".hdr")
+    {
+        ok = loadHDR(bytes.data(), bytes.size(), true);
+    }
+    else
+    {
+        ok = loadImage(bytes.data(), bytes.size(), srgb, true);
+    }
 
     if (!ok) std::cerr << "Texture load failed: " << path << '\n';
 }
@@ -147,6 +158,83 @@ bool Texture::loadImage(const std::uint8_t* bytes, std::size_t size, bool srgb, 
         ID = 0;
         return false;
     }
+
+    return true;
+}
+
+bool Texture::loadHDR(const std::uint8_t* bytes, std::size_t size, bool flipY)
+{
+    if (size == 0)
+    {
+        std::cerr << "HDR file empty\n";
+        return false;
+    }
+
+    stbi_set_flip_vertically_on_load(flipY ? 1 : 0);
+
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+
+    float* pixels = stbi_loadf_from_memory(bytes, static_cast<int>(size), &width, &height, &channels, 0);
+
+    if (!pixels)
+    {
+        std::cerr << "stb_image HDR: " << stbi_failure_reason() << '\n';
+        return false;
+    }
+
+    GLenum format = 0;
+    GLenum internal = 0;
+
+    switch (channels)
+    {
+    case 1:
+        format = GL_RED;
+        internal = GL_R16F;
+        break;
+
+    case 2:
+        format = GL_RG;
+        internal = GL_RG16F;
+        break;
+
+    case 3:
+        format = GL_RGB;
+        internal = GL_RGB32F;
+        break;
+
+    case 4:
+        format = GL_RGBA;
+        internal = GL_RGBA16F;
+        break;
+
+    default:
+        stbi_image_free(pixels);
+        return false;
+    }
+
+    glGenTextures(1, &ID);
+    glBindTexture(GL_TEXTURE_2D, ID);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    glTexImage2D(GL_TEXTURE_2D, 0, internal, width, height, 0, format, GL_FLOAT, pixels);
+
+    stbi_image_free(pixels);
+
+    if (glGetError() != GL_NO_ERROR)
+    {
+        glDeleteTextures(1, &ID);
+        ID = 0;
+        return false;
+    }
+
+    std::cout << "HDR loaded: " << width << "x" << height << ", channels=" << channels << '\n';
 
     return true;
 }

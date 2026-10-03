@@ -28,7 +28,7 @@ public:
     void renderGeometryPass(const Scene& scene, Camera& camera);
     void renderSSAOPass(Mesh& quad, Camera& camera);
     void renderSSAOBlurPass(Mesh& quad);
-    void renderDeferredLightingPass(Mesh& quad, Camera& camera, const Scene& scene, int debugView);
+    void renderDeferredLightingPass(Mesh& quad, Camera& camera, const Scene& scene, int debugView, unsigned int environmentCubemap, unsigned int irradianceMap, unsigned int prefilterMap, unsigned int brdfLUT);
 
     unsigned int getShadowMap() const;
     unsigned int getSceneColorTexture() const;

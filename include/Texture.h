@@ -25,5 +25,7 @@ private:
 
     bool loadImage(const std::uint8_t* bytes, std::size_t size, bool srgb, bool flipY);
 
+    bool loadHDR(const std::uint8_t* bytes, std::size_t size, bool flipY);
+
     bool loadKtx2(const std::uint8_t* bytes, std::size_t size);
 };

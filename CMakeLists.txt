@@ -89,6 +89,7 @@ add_executable(
     src/Scene.cpp
     src/AssetManager.cpp
     src/Renderer.cpp
+    src/EnvironmentMap.cpp
 )
 
 target_include_directories(

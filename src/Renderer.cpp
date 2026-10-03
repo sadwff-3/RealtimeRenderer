@@ -43,6 +43,10 @@ Renderer::Renderer(int width, int height) :shadowShader("shaders/shadow_depth.ve
 	deferredShader.setInt("ssaoMap", 5);
 	deferredShader.setInt("spotShadowMaps", 6);
 	deferredShader.setInt("pointShadowMaps", 7);
+	deferredShader.setInt("environmentMap", 8);
+	deferredShader.setInt("irradianceMap", 9);
+	deferredShader.setInt("prefilterMap", 10);
+	deferredShader.setInt("brdfLUT", 11);
 
 	
 	screenShader.use();
@@ -723,7 +727,7 @@ void Renderer::renderSSAOBlurPass(Mesh& quad)
 }
 
 
-void Renderer::renderDeferredLightingPass(Mesh& quad, Camera& camera, const Scene& scene, int debugView)
+void Renderer::renderDeferredLightingPass(Mesh& quad, Camera& camera, const Scene& scene, int debugView, unsigned int environmentCubemap, unsigned int irradianceMap, unsigned int prefilterMap, unsigned int brdfLUT)
 {
 	glBindFramebuffer(GL_FRAMEBUFFER, sceneFBO);
 	glViewport(0, 0, framebufferWidth, framebufferHeight);
@@ -757,6 +761,18 @@ void Renderer::renderDeferredLightingPass(Mesh& quad, Camera& camera, const Scen
 
 	glActiveTexture(GL_TEXTURE7);
 	glBindTexture(GL_TEXTURE_CUBE_MAP_ARRAY, pointShadowArray);
+
+	glActiveTexture(GL_TEXTURE8);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, environmentCubemap);
+
+	glActiveTexture(GL_TEXTURE9);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, irradianceMap);
+
+	glActiveTexture(GL_TEXTURE10);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, prefilterMap);
+
+	glActiveTexture(GL_TEXTURE11);
+	glBindTexture(GL_TEXTURE_2D, brdfLUT);
 
 
 	glm::mat4 view = camera.getViewMatrix();
