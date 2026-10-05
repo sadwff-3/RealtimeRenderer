@@ -14,15 +14,38 @@ uniform mat4 view;
 uniform mat4 projection;
 
 
+vec3 fallbackTangent(vec3 N)
+{
+    vec3 helper = abs(N.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+
+    return normalize(cross(helper, N));
+}
+
+
 void main()
 {
     vec4 worldPos = model * vec4(aPos, 1.0);
 
     vec3 N = normalize(mat3(transpose(inverse(model))) * aNormal);
-    vec3 T = normalize(mat3(model) * aTangent);
-    vec3 B = normalize(mat3(model) * aBitangent);
+    mat3 model3 = mat3(model);
+    vec3 rawT = model3 * aTangent;
+    vec3 rawB = model3 * aBitangent;
+
     
+    vec3 T = rawT - N * dot(N, rawT);
+
+    if (dot(T, T) > 1e-10)
+        T = normalize(T);
+    else
+        T = fallbackTangent(N);
+
+    
+    float handedness = dot(cross(N, T), rawB) < 0.0 ? -1.0 : 1.0;
+
+    vec3 B = handedness * normalize(cross(N, T));
+
     TBN = mat3(T, B, N);
+
     TexCoord = aTexCoord;
 
     gl_Position = projection * view * worldPos;

@@ -16,6 +16,7 @@ void Material::bind(Shader& shader) const
 	shader.setFloat("roughnessFactor", roughnessFactor);
 	shader.setFloat("normalYSign", normalYSign);
 	shader.setInt("alphaMode", alphaMode);
+	shader.setInt("doubleSided", doubleSided ? 1 : 0);
 	shader.setFloat("alphaCutoff", alphaCutoff);
 
 	shader.setInt("albedoMap", 0);

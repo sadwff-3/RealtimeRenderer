@@ -20,12 +20,18 @@
 #include<vector>
 #include<utility>
 #include <iostream>
+#include<imgui.h>
+#include<imgui_internal.h>
+#include<imgui_impl_glfw.h>
+#include<imgui_impl_opengl3.h>
 
 //Camera
 Camera camera;
 float lastX = 640.0f;
 float lastY = 360.0f;
 bool firstMouse = true;
+bool viewportHovered = false;
+bool cameraMouseLocked = false;
 
 //framebuffer size
 int framebufferWidth = 1280;
@@ -34,6 +40,12 @@ bool framebufferResized = false;
 
 void mouse_callback(GLFWwindow* window, double xpos, double ypos)
 {
+    if (!cameraMouseLocked)
+    {
+        firstMouse = true;
+        return;
+    }
+
     if (firstMouse)
     {
         lastX = static_cast<float>(xpos);
@@ -50,6 +62,29 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
     camera.processMouseMovement(xoffset, yoffset);
 }
 
+
+void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
+{
+    if (button != GLFW_MOUSE_BUTTON_RIGHT || action != GLFW_PRESS)
+        return;
+
+    if (cameraMouseLocked)
+    {
+        cameraMouseLocked = false;
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        firstMouse = true;
+        return;
+    }
+
+    if (viewportHovered)
+    {
+        cameraMouseLocked = true;
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        firstMouse = true;
+    }
+}
+
+
 void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 {
     framebufferWidth = width;
@@ -58,10 +93,17 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height)
     glViewport(0, 0, width, height);
 }
 
+
 void scroll_callback(GLFWwindow* window,double xoffset,double yoffset)
 {
+    if (ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureMouse)
+    {
+        return;
+    }
+
     camera.processMouseScroll(static_cast<float>(yoffset));
 }
+
 
 int main(int argc, char** argv)
 {
@@ -103,11 +145,24 @@ int main(int argc, char** argv)
     glfwGetFramebufferSize(window, &framebufferWidth, &framebufferHeight);
     glViewport(0, 0, framebufferWidth, framebufferHeight);
     
-    glfwSetFramebufferSizeCallback(window,framebuffer_size_callback);
-    glfwSetCursorPosCallback(window,mouse_callback);
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+    glfwSetCursorPosCallback(window, mouse_callback);
     glfwSetScrollCallback(window, scroll_callback);
-    glfwSetInputMode(window,GLFW_CURSOR,GLFW_CURSOR_DISABLED);
+    glfwSetMouseButtonCallback(window, mouse_button_callback);
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 450");
     
+   
     //shader•’•°•§•Î§Ú’i§ﬂﬁz§‡
     {
         
@@ -115,6 +170,9 @@ int main(int argc, char** argv)
         
         AssetManager assets;
         Scene scene;
+
+        SceneObject* selectedObject = nullptr;
+
         Renderer renderer(framebufferWidth, framebufferHeight);
         EnvironmentMap environmentMap;
         Texture testHDR("assets/apartment/cayley_interior_4k.hdr");
@@ -127,19 +185,17 @@ int main(int argc, char** argv)
             environmentMap.generateBRDFLUT();
         }
 
-        Model* livingRoom = assets.loadModel("assets/Bistro/BistroExterior.gltf");
+        Model* apartment =
+            assets.loadModel("assets/apartment/scene.gltf", true);
 
-        if (livingRoom)
+        if (apartment)
         {
-            scene.addObject("LivingRoom", livingRoom);
+            scene.addObject("Apartment", apartment);
         }
         else
         {
-            std::cerr << "Failed to load Sponza\n";
+            std::cerr << "Failed to load Apartment\n";
         }
-
-        
-
 
         //debug
         std::vector<Vertex> debugQuadVertices =
@@ -167,6 +223,9 @@ int main(int argc, char** argv)
         float lastFrame = 0.0f;
         int toneMappingMode = 1;
         int debugView = 0;
+
+        int viewportRenderWidth = framebufferWidth;
+        int viewportRenderHeight = framebufferHeight;
         
         //Lights
         
@@ -262,12 +321,10 @@ int main(int argc, char** argv)
                 continue;
             }
 
-            if (framebufferResized)
-            {
-                renderer.resizeSceneFramebuffer(framebufferWidth, framebufferHeight);
-                framebufferResized = false;
-            }
-    
+            ImGui_ImplOpenGL3_NewFrame();
+            ImGui_ImplGlfw_NewFrame();
+            ImGui::NewFrame();
+            
          //DirectionalShadowPass
             renderer.renderDirectionalShadowPass(scene);
 
@@ -305,12 +362,131 @@ int main(int argc, char** argv)
 
                 glEnable(GL_DEPTH_TEST);
             }
+            ImGuiViewport* viewport = ImGui::GetMainViewport();
 
+            ImGui::SetNextWindowPos(viewport->WorkPos);
+            ImGui::SetNextWindowSize(viewport->WorkSize);
+            ImGui::SetNextWindowViewport(viewport->ID);
+
+            ImGuiWindowFlags dockspaceFlags = ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoBackground;
+
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+
+            ImGui::Begin("EditorDockSpace", nullptr, dockspaceFlags);
+            ImGui::PopStyleVar(3);
+
+            ImGuiID dockspaceID = ImGui::GetID("EditorDockSpaceID");
+
+            static bool dockLayoutBuilt = false;
+
+            if (!dockLayoutBuilt)
+            {
+                dockLayoutBuilt = true;
+
+                ImGui::DockBuilderRemoveNode(dockspaceID);
+
+                ImGui::DockBuilderAddNode(dockspaceID, ImGuiDockNodeFlags_DockSpace);
+
+                ImGui::DockBuilderSetNodeSize(dockspaceID, viewport->WorkSize);
+
+                ImGuiID dockMainID = dockspaceID;
+
+                ImGuiID dockLeftID = ImGui::DockBuilderSplitNode(dockMainID, ImGuiDir_Left, 0.20f, nullptr, &dockMainID);
+
+                ImGuiID dockRightID = ImGui::DockBuilderSplitNode(dockMainID, ImGuiDir_Right, 0.25f, nullptr, &dockMainID);
+
+                ImGui::DockBuilderDockWindow("Hierarchy", dockLeftID);
+
+                ImGui::DockBuilderDockWindow("Inspector", dockRightID);
+
+                ImGui::DockBuilderDockWindow("Viewport", dockMainID);
+
+                ImGui::DockBuilderFinish(dockspaceID);
+            }
+
+            ImGui::DockSpace(dockspaceID, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
+
+            ImGui::End();
+
+            ImGui::Begin("Hierarchy");
+            for (const auto& object : scene.getObjects())
+            {
+                bool selected = (selectedObject == object.get());
+
+                if (ImGui::Selectable(object->name.c_str(), selected))
+                {
+                    selectedObject = object.get();
+                }
+            }
+            ImGui::End();
+
+            ImGui::Begin("Viewport");
+            viewportHovered = ImGui::IsWindowHovered();
+            ImVec2 viewportSize = ImGui::GetContentRegionAvail();
+            
+            int newViewportWidth = static_cast<int>(viewportSize.x);
+            int newViewportHeight = static_cast<int>(viewportSize.y);
+            if (newViewportWidth > 0 && newViewportHeight > 0 && (newViewportWidth != viewportRenderWidth || newViewportHeight != viewportRenderHeight))
+            {
+                viewportRenderWidth = newViewportWidth;viewportRenderHeight = newViewportHeight;
+
+                renderer.resizeSceneFramebuffer(viewportRenderWidth, viewportRenderHeight);
+            }
+
+            ImGui::Image((ImTextureID)(intptr_t)renderer.getFinalColorTexture(), viewportSize, ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
+            ImGui::End();
+
+            ImGui::Begin("Inspector");
+            if (selectedObject != nullptr)
+            {
+                ImGui::TextUnformatted(selectedObject->name.c_str());
+                ImGui::Separator();
+                ImGui::TextUnformatted("Transform");
+                ImGui::DragFloat3("Position", &selectedObject->transform.position.x, 0.05f);
+                ImGui::DragFloat3("Rotation", &selectedObject->transform.rotation.x, 0.5f);
+                ImGui::DragFloat3("Scale", &selectedObject->transform.scale.x, 0.05f);
+
+                if (selectedObject->light.has_value())
+                {
+                    Light& light = selectedObject->light.value();
+
+                    ImGui::Separator();
+                    ImGui::TextUnformatted("Light");
+
+                    ImGui::ColorEdit3("Color", &light.color.x);
+                    ImGui::DragFloat("Intensity", &light.intensity, 0.1f, 0.0f, 100.0f);
+                    
+                if (light.type == LightType::Point || light.type == LightType::Spot)
+                    {
+                        ImGui::DragFloat("Range", &light.range, 0.1f, 0.1f, 100.0f);
+                    }
+
+                    if (light.type == LightType::Spot)
+                    {
+                        ImGui::DragFloat("Inner Angle", &light.innerAngle, 0.5f, 0.0f, 90.0f);
+                        ImGui::DragFloat("Outer Angle", &light.outerAngle, 0.5f, 0.0f, 90.0f);
+                    }
+                }
+            }
+            else
+            {
+                ImGui::TextUnformatted("No object selected");
+            }
+            ImGui::End();
+
+            ImGui::Render();
+            ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
             glfwSwapBuffers(window);
             glfwPollEvents();
         }
     }
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+
     glfwDestroyWindow(window);
     glfwTerminate();
     return 0;

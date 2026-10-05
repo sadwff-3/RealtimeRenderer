@@ -72,7 +72,33 @@ set(KTX_GIT_VERSION_FULL v4.3.2 CACHE STRING "" FORCE)
 
 add_subdirectory(external/KTX-Software)
 
-# ---------------- Renderer ----------------
+# ---------------- Dear ImGui ----------------
+
+add_library(
+    imgui
+    STATIC
+    external/imgui/imgui.cpp
+    external/imgui/imgui_draw.cpp
+    external/imgui/imgui_tables.cpp
+    external/imgui/imgui_widgets.cpp
+    external/imgui/backends/imgui_impl_glfw.cpp
+    external/imgui/backends/imgui_impl_opengl3.cpp
+)
+
+target_include_directories(
+    imgui
+    PUBLIC
+    ${CMAKE_SOURCE_DIR}/external/imgui
+    ${CMAKE_SOURCE_DIR}/external/imgui/backends
+)
+
+target_link_libraries(
+    imgui
+    PUBLIC
+    glfw
+)
+
+# ---------------- Renderer ------------------
 
 add_executable(
     renderer
@@ -108,6 +134,7 @@ target_link_libraries(
     assimp::assimp
     fastgltf::fastgltf
     ktx
+    imgui
 )
 
 # ---------------- Shaders ----------------

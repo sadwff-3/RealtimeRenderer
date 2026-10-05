@@ -17,6 +17,7 @@
 Renderer::Renderer(int width, int height) :shadowShader("shaders/shadow_depth.vert", "shaders/shadow_depth.frag"), pointShadowShader("shaders/point_shadow.vert", "shaders/point_shadow.frag"), sceneShader("shaders/pbr.vert", "shaders/pbr.frag"), screenShader("shaders/screen.vert", "shaders/screen.frag"), geometryShader("shaders/gbuffer.vert", "shaders/gbuffer.frag"), ssaoShader("shaders/screen.vert", "shaders/ssao.frag"), ssaoBlurShader("shaders/screen.vert", "shaders/ssao_blur.frag"), deferredShader("shaders/screen.vert", "shaders/deferred_lighting.frag"), framebufferWidth(width), framebufferHeight(height)
 {
 	initSceneFramebuffer();
+	initFinalFramebuffer();
 	initGBuffer();
 	initSSAOFramebuffer();
 	initSSAOKernel();
@@ -144,6 +145,16 @@ Renderer::~Renderer()
 	{
 		glDeleteFramebuffers(1, &pointShadowFBO);
 	}
+
+	if (finalColorTexture != 0)
+	{
+		glDeleteTextures(1, &finalColorTexture);
+	}
+
+	if (finalFBO != 0)
+	{
+		glDeleteFramebuffers(1, &finalFBO);
+	}
 }
 
 void Renderer::initDirectionalShadowMaps()
@@ -258,6 +269,30 @@ void Renderer::initSceneFramebuffer()
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
 	{
 		std::cerr << "Scene framebuffer is not complete!\n";
+	}
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+
+void Renderer::initFinalFramebuffer()
+{
+	glGenFramebuffers(1, &finalFBO);
+	glBindFramebuffer(GL_FRAMEBUFFER, finalFBO);
+
+	glGenTextures(1, &finalColorTexture);
+	glBindTexture(GL_TEXTURE_2D, finalColorTexture);
+
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, framebufferWidth, framebufferHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, finalColorTexture, 0);
+
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+	{
+		std::cerr << "Final framebuffer is not complete!\n";
 	}
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -816,10 +851,7 @@ void Renderer::renderDeferredLightingPass(Mesh& quad, Camera& camera, const Scen
 		{
 			shadowLayer = directionalShadowIndex;
 
-			deferredShader.setMat4(
-				base + ".lightSpaceMatrix",
-				directionalLightSpaceMatrices[directionalShadowIndex]
-			);
+			deferredShader.setMat4(base + ".lightSpaceMatrix", directionalLightSpaceMatrices[directionalShadowIndex]);
 
 			++directionalShadowIndex;
 		}
@@ -968,7 +1000,7 @@ void Renderer::renderScenePass(const Scene& scene, Camera& camera, const Directi
 
 void Renderer::renderScreenPass(Mesh& quad, int toneMappingMode, int debugView)
 {
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glBindFramebuffer(GL_FRAMEBUFFER, finalFBO);
 	glViewport(0, 0, framebufferWidth, framebufferHeight);
 
 	glDisable(GL_DEPTH_TEST);
@@ -985,6 +1017,8 @@ void Renderer::renderScreenPass(Mesh& quad, int toneMappingMode, int debugView)
 	quad.draw();
 
 	glEnable(GL_DEPTH_TEST);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 
@@ -1001,6 +1035,9 @@ void Renderer::resizeSceneFramebuffer(int width, int height)
 
 	glBindTexture(GL_TEXTURE_2D, sceneColorTexture);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, framebufferWidth, framebufferHeight, 0, GL_RGB, GL_FLOAT, nullptr);
+
+	glBindTexture(GL_TEXTURE_2D, finalColorTexture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, framebufferWidth, framebufferHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 
 	glBindRenderbuffer(GL_RENDERBUFFER, sceneRBO);
 	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, framebufferWidth, framebufferHeight);
@@ -1021,8 +1058,10 @@ void Renderer::resizeSceneFramebuffer(int width, int height)
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, framebufferWidth, framebufferHeight, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
 
 	glBindTexture(GL_TEXTURE_2D, ssaoBlurTexture);
-
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, framebufferWidth, framebufferHeight, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
+
+	glBindTexture(GL_TEXTURE_2D, finalColorTexture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, framebufferWidth, framebufferHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 }
 
 
@@ -1039,4 +1078,10 @@ void Renderer::beginScenePass()
 unsigned int Renderer::getSceneColorTexture() const
 {
 	return sceneColorTexture;
+}
+
+
+unsigned int Renderer::getFinalColorTexture() const
+{
+	return finalColorTexture;
 }

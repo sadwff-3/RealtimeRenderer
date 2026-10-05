@@ -267,9 +267,19 @@ void Model::loadGltf(const std::string& path) {
 
         out.baseColorFactor = glm::vec4(factor[0], factor[1], factor[2], factor[3]);
         out.metallicFactor = m.pbrData.metallicFactor;
-        out.roughnessFactor = m.pbrData.roughnessFactor;
+        const bool usesBistroORM =
+            bistroPacking &&
+            !m.pbrData.metallicRoughnessTexture &&
+            m.specular &&
+            m.specular->specularTexture &&
+            mr != defaultAO.get();
+
+        out.roughnessFactor = usesBistroORM
+            ? 1.0f
+            : m.pbrData.roughnessFactor;
         out.normalYSign = directXNormals ? -1.0f : 1.0f;
         out.alphaMode = static_cast<int>(m.alphaMode);
+        out.doubleSided = m.doubleSided;
         out.alphaCutoff = m.alphaCutoff;
 
         return out;
@@ -379,7 +389,66 @@ void Model::loadGltf(const std::string& path) {
                         std::cerr << "glTF TEXCOORD_0 accessor index out of range; using default UVs\n";
                     }
                 }
+                bool hasTangents = false;
 
+                if (const auto* tangents =
+                    primitive.findAttribute("TANGENT"))
+                {
+                    if (tangents->accessorIndex < asset.accessors.size())
+                    {
+                        const auto& accessor =
+                            asset.accessors[tangents->accessorIndex];
+
+                        if (accessor.type == fastgltf::AccessorType::Vec4 &&
+                            accessor.count == vertices.size())
+                        {
+                            hasTangents = true;
+
+                            const glm::mat3 linearTransform(transform);
+                            const float transformSign =
+                                glm::determinant(linearTransform) < 0.0f
+                                ? -1.0f : 1.0f;
+
+                            fastgltf::iterateAccessorWithIndex<glm::vec4>(
+                                asset,
+                                accessor,
+                                [&](const glm::vec4& tangent,
+                                    std::size_t i)
+                                {
+                                    if (i >= vertices.size())
+                                        return;
+
+                                    const glm::vec3 N = vertices[i].normal;
+
+                                    glm::vec3 T =
+                                        linearTransform * glm::vec3(tangent);
+
+                                    T -= N * glm::dot(N, T);
+
+                                    const float lengthSquared = glm::dot(T, T);
+
+                                    if (!(lengthSquared > 1e-10f))
+                                    {
+                                        hasTangents = false;
+                                        return;
+                                    }
+
+                                    T = glm::normalize(T);
+
+                                    const float handedness =
+                                        (tangent.w < 0.0f ? -1.0f : 1.0f)
+                                        * transformSign;
+
+                                    vertices[i].tangent = T;
+                                    vertices[i].bitangent =
+                                        handedness * glm::normalize(
+                                            glm::cross(N, T)
+                                        );
+                                }
+                            );
+                        }
+                    }
+                }
                 std::vector<unsigned int> indices;
 
                 if (primitive.indicesAccessor) {
@@ -435,7 +504,7 @@ void Model::loadGltf(const std::string& path) {
 
                 meshMaterials.push_back(makeMaterial(primitive.materialIndex));
 
-                meshes.emplace_back(vertices, indices);
+                meshes.emplace_back(vertices, indices, hasTangents);
             }
         }
     );

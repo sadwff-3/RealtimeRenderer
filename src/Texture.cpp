@@ -275,18 +275,79 @@ bool Texture::loadKtx2(const std::uint8_t* bytes, std::size_t size) {
     GLenum glError = GL_NO_ERROR;
     GLuint glTexture = 0;
 
-    const auto upload = ktxTexture_GLUpload(ktxTexture(ktx), &glTexture, &target, &glError);
-    const bool mipmaps = ktx->numLevels > 1;
+    // 必须在销毁 ktx 前保存这些信息。
+    const unsigned int sourceLevels = ktx->numLevels;
+    const unsigned int width = ktx->baseWidth;
+    const unsigned int height = ktx->baseHeight;
+
+    const auto upload = ktxTexture_GLUpload(
+        ktxTexture(ktx), &glTexture, &target, &glError
+    );
+
     ktxTexture_Destroy(ktxTexture(ktx));
 
-    if (upload != KTX_SUCCESS || target != GL_TEXTURE_2D) {
-        std::cerr << "libktx: GL upload failed (code " << upload << ", GL error " << glError << ")\n";
-        if (glTexture) glDeleteTextures(1, &glTexture);
+    if (upload != KTX_SUCCESS ||
+        target != GL_TEXTURE_2D ||
+        glError != GL_NO_ERROR)
+    {
+        std::cerr << "libktx: GL upload failed (code "
+            << upload << ", GL error " << glError << ")\n";
+
+        if (glTexture)
+            glDeleteTextures(1, &glTexture);
+
         return false;
     }
 
+    glBindTexture(GL_TEXTURE_2D, glTexture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+
+    unsigned int finalLevels = sourceLevels;
+
+    // 已经带 mip 的资产保留原来的 mip。
+    // 单级纹理则生成完整 mip 链。
+    if (sourceLevels == 1 && (width > 1 || height > 1))
+    {
+        unsigned int largestSize = std::max(width, height);
+        finalLevels = 1;
+
+        while (largestSize > 1)
+        {
+            largestSize >>= 1;
+            ++finalLevels;
+        }
+
+        // libktx 上传单级纹理时会把 MAX_LEVEL 设置成 0。
+        // 必须先解除这个限制，再生成 mip。
+        glTexParameteri(
+            GL_TEXTURE_2D,
+            GL_TEXTURE_MAX_LEVEL,
+            static_cast<GLint>(finalLevels - 1)
+        );
+
+        glGenerateMipmap(GL_TEXTURE_2D);
+
+        const GLenum mipError = glGetError();
+
+        if (mipError != GL_NO_ERROR)
+        {
+            std::cerr << "KTX2 mip generation failed: "
+                << mipError << '\n';
+
+            glDeleteTextures(1, &glTexture);
+            return false;
+        }
+    }
+
+    glTexParameteri(
+        GL_TEXTURE_2D,
+        GL_TEXTURE_MAX_LEVEL,
+        static_cast<GLint>(finalLevels - 1)
+    );
+
     ID = glTexture;
-    configureTexture(ID, mipmaps);
+    configureTexture(ID, finalLevels > 1);
+
     return true;
 }
 

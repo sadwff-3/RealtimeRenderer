@@ -2,10 +2,14 @@
 #include <iostream>
 #include <stdexcept>
 
-Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices)
-    : vertices(vertices), indices(indices)
+Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices, bool hasTangents) : vertices(vertices), indices(indices)
 {
-    calculateTangents();
+
+    if (!hasTangents)
+    {
+        calculateTangents();
+    }
+
     setupMesh();
 }
 

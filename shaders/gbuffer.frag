@@ -18,23 +18,61 @@ uniform float roughnessFactor;
 uniform float normalYSign;
 uniform int alphaMode;
 uniform float alphaCutoff;
+uniform bool doubleSided;
+
+
+vec3 fallbackTangent(vec3 N)
+{
+    vec3 helper = abs(N.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+
+    return normalize(cross(helper, N));
+}
+
 
 void main()
 {
     vec4 baseColor = texture(albedoMap, TexCoord) * baseColorFactor;
     if (alphaMode == 1 && baseColor.a < alphaCutoff) discard;
-    vec3 albedo = baseColor.rgb;
 
-    vec3 tangentNormal = texture(normalMap, TexCoord).rgb;
-    tangentNormal = tangentNormal * 2.0 - 1.0;
-    tangentNormal.y *= normalYSign;
-    vec3 normal = normalize(TBN * tangentNormal);
+    vec3 N = normalize(TBN[2]);
+    vec3 T = TBN[0] - N * dot(N, TBN[0]);
 
-    float metallic = texture(metallicMap, TexCoord).b * metallicFactor;
-    float roughness = texture(roughnessMap, TexCoord).g * roughnessFactor;
+    if (dot(T, T) > 1e-10)
+        T = normalize(T);
+    else
+        T = fallbackTangent(N);
+
+    float handedness =
+        dot(cross(N, T), TBN[1]) < 0.0 ? -1.0 : 1.0;
+
+    vec3 B = handedness * normalize(cross(N, T));
+
+    vec2 normalXY =
+        texture(normalMap, TexCoord).rg * 2.0 - 1.0;
+
+    normalXY.y *= normalYSign;
+
+    float normalZ =
+        sqrt(max(1.0 - dot(normalXY, normalXY), 0.0));
+
+    vec3 tangentNormal =
+        normalize(vec3(normalXY, normalZ));
+
+    vec3 normal =
+        normalize(mat3(T, B, N) * tangentNormal);
+
+    if (doubleSided && !gl_FrontFacing)
+        normal = -normal;
+
+    float metallic =
+        texture(metallicMap, TexCoord).b * metallicFactor;
+
+    float roughness =
+        texture(roughnessMap, TexCoord).g * roughnessFactor;
+
     float ao = texture(aoMap, TexCoord).r;
 
     gNormal = normal;
-    gAlbedo = vec4(albedo, 1.0);
+    gAlbedo = vec4(baseColor.rgb, 1.0);
     gMaterial = vec4(metallic, roughness, ao, 1.0);
 }

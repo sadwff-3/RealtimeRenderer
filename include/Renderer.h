@@ -32,6 +32,7 @@ public:
 
     unsigned int getShadowMap() const;
     unsigned int getSceneColorTexture() const;
+    unsigned int getFinalColorTexture() const;
 
 private:
     Shader shadowShader;
@@ -73,6 +74,8 @@ private:
     unsigned int spotShadowArray = 0;
     unsigned int pointShadowFBO = 0;
     unsigned int pointShadowArray = 0;
+    unsigned int finalFBO = 0;
+    unsigned int finalColorTexture = 0;
 
     std::array<glm::mat4, MAX_SPOT_SHADOWS> spotLightSpaceMatrices{};
     std::array<glm::mat4, MAX_DIRECTIONAL_SHADOWS> directionalLightSpaceMatrices{};
@@ -94,5 +97,5 @@ private:
     void initDirectionalShadowMaps();
     void initSpotShadowMaps();
     void initPointShadowMaps();
-  
+    void initFinalFramebuffer();
 };

@@ -19,6 +19,7 @@ public:
     float normalYSign = 1.0f;
     int alphaMode = 0;
     float alphaCutoff = 0.5f;
+    bool doubleSided = false;
 
     float ambientStrength;
     float specularStrength;
