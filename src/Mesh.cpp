@@ -1,6 +1,8 @@
 #include"Mesh.h"
+
 #include <iostream>
 #include <stdexcept>
+
 
 Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices, bool hasTangents) : vertices(vertices), indices(indices)
 {
@@ -9,6 +11,8 @@ Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<unsigned int>&
     {
         calculateTangents();
     }
+
+    calculateBounds();
 
     setupMesh();
 }
@@ -127,6 +131,7 @@ void Mesh::calculateTangents()
     }
 }
 
+
 Mesh::~Mesh()
 {
     if (EBO != 0)
@@ -145,12 +150,14 @@ Mesh::~Mesh()
     }
 }
 
-Mesh::Mesh(Mesh&& other)noexcept :vertices(std::move(other.vertices)), indices(std::move(other.indices)), VAO(other.VAO), VBO(other.VBO), EBO(other.EBO)
+
+Mesh::Mesh(Mesh&& other)noexcept :vertices(std::move(other.vertices)), indices(std::move(other.indices)), boundsMin(other.boundsMin), boundsMax(other.boundsMax), VAO(other.VAO), VBO(other.VBO), EBO(other.EBO)
 {
     other.VAO = 0;
     other.VBO = 0;
     other.EBO = 0;
 }
+
 
 Mesh& Mesh::operator=(Mesh&& other)noexcept
 {
@@ -173,6 +180,8 @@ Mesh& Mesh::operator=(Mesh&& other)noexcept
 
         vertices = std::move(other.vertices);
         indices = std::move(other.indices);
+        boundsMin = other.boundsMin;
+        boundsMax = other.boundsMax;
 
         VAO = other.VAO;
         VBO = other.VBO;
@@ -184,5 +193,37 @@ Mesh& Mesh::operator=(Mesh&& other)noexcept
     }
 
     return *this;
+}
+
+
+void Mesh::calculateBounds()
+{
+    if (vertices.empty())
+    {
+        boundsMin = glm::vec3(0.0f);
+        boundsMax = glm::vec3(0.0f);
+        return;
+    }
+
+    boundsMin = vertices[0].position;
+    boundsMax = vertices[0].position;
+
+    for (const Vertex& vertex : vertices)
+    {
+        boundsMin = glm::min(boundsMin, vertex.position);
+        boundsMax = glm::max(boundsMax, vertex.position);
+    }
+}
+
+
+const glm::vec3& Mesh::getBoundsMin() const
+{
+    return boundsMin;
+}
+
+
+const glm::vec3& Mesh::getBoundsMax() const
+{
+    return boundsMax;
 }
 

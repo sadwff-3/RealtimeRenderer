@@ -2,13 +2,7 @@
 
 #include <glm/glm.hpp>
 
-enum class CameraMovement
-{
-    Forward,
-    Backward,
-    Left,
-    Right
-};
+enum class CameraMovement {Forward, Backward, Left, Right, Up, Down};
 
 class Camera
 {
@@ -24,6 +18,8 @@ public:
     float MovementSpeed;
     float MouseSensitivity;
     float Zoom;
+    float NearPlane = 0.1f;
+    float FarPlane = 2000.0f;
 
     Camera(
         glm::vec3 position = glm::vec3(0.0f, 0.0f, 3.0f),
@@ -33,6 +29,7 @@ public:
     );
 
     glm::mat4 getViewMatrix() const;
+    glm::mat4 getProjectionMatrix(float aspectRatio) const;
 
     void processKeyboard(
         CameraMovement direction,

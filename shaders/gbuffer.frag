@@ -3,6 +3,8 @@
 layout (location = 0) out vec3 gNormal;
 layout (location = 1) out vec4 gAlbedo;
 layout (location = 2) out vec4 gMaterial;
+layout (location = 3) out uint gObjectID;
+layout (location = 4) out uint gMaterialID;
 
 in vec2 TexCoord;
 in mat3 TBN;
@@ -19,6 +21,8 @@ uniform float normalYSign;
 uniform int alphaMode;
 uniform float alphaCutoff;
 uniform bool doubleSided;
+uniform int objectID;
+uniform int materialID;
 
 
 vec3 fallbackTangent(vec3 N)
@@ -75,4 +79,6 @@ void main()
     gNormal = normal;
     gAlbedo = vec4(baseColor.rgb, 1.0);
     gMaterial = vec4(metallic, roughness, ao, 1.0);
+    gObjectID = uint(objectID);
+    gMaterialID = uint(materialID);
 }

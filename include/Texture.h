@@ -17,6 +17,7 @@ public:
     Texture& operator = (const Texture&) = delete;
 
     void bind() const;
+    void setSampler(int minFilter, int magFilter, int wrapS, int wrapT);
 
     bool valid() const { return ID != 0; }
 

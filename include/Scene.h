@@ -16,6 +16,8 @@ public:
 
     SceneObject& addLight(const std::string& name, const Light& light);
 
+    bool removeObject(SceneObject* object);
+
     std::vector<std::unique_ptr<SceneObject>>& getObjects();
     const std::vector<std::unique_ptr<SceneObject>>& getObjects() const;
     const std::vector<SceneObject*>& getLights() const;

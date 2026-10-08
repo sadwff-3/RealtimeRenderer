@@ -19,6 +19,7 @@ static glm::mat4 aiMatrixToGlm(const aiMatrix4x4& m)
 	return result;
 }
 
+
 Model::Model(const std::string& path, bool useDirectXNormals) : directXNormals(useDirectXNormals)
 {
 	defaultDiffuse = std::make_unique<Texture>(255, 255, 255);
@@ -27,7 +28,9 @@ Model::Model(const std::string& path, bool useDirectXNormals) : directXNormals(u
 	defaultRoughness = std::make_unique<Texture>(128, 128, 128);
 	defaultAO = std::make_unique<Texture>(255, 255, 255);
 	loadModel(path);
+	calculateBounds();
 }
+
 
 void Model::loadModel(const std::string& path)
 {
@@ -53,6 +56,7 @@ void Model::loadModel(const std::string& path)
 	loaded = true;
 }
 
+
 void Model::processNode(aiNode* node, const aiScene* scene, const glm::mat4& parentTransform)
 {
 	glm::mat4 localTransform = aiMatrixToGlm(node->mTransformation);
@@ -69,6 +73,7 @@ void Model::processNode(aiNode* node, const aiScene* scene, const glm::mat4& par
 		processNode(node->mChildren[i], scene, globalTransform);
 	}
 }
+
 
 Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene, const glm::mat4& transform)
 {
@@ -202,15 +207,37 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene, const glm::mat4& tra
 	return Mesh(vertices, indices);
 }
 
+
 void Model::draw(Shader& shader) const
 {
 
 	for (std::size_t i = 0; i < meshes.size(); ++i)
 	{
+		shader.setInt("materialID", static_cast<int>(i + 1));
 		meshMaterials[i].bind(shader);
 		meshes[i].draw();
 	}
 }
+
+
+void Model::drawShadow(Shader& shader) const
+{
+	shader.setInt("albedoMap", 0);
+	for (std::size_t i = 0; i < meshes.size(); ++i)
+	{
+		const Material& material = meshMaterials[i];
+		shader.setInt("alphaMode", material.alphaMode);
+		shader.setFloat("alphaCutoff", material.alphaCutoff);
+		shader.setVec4("baseColorFactor", material.baseColorFactor);
+		if (material.alphaMode == 1)
+		{
+			glActiveTexture(GL_TEXTURE0);
+			material.albedo->bind();
+		}
+		meshes[i].draw();
+	}
+}
+
 
 void Model::drawGeometry() const
 {
@@ -219,6 +246,7 @@ void Model::drawGeometry() const
 		mesh.draw();
 	}
 }
+
 
 Texture* Model::loadTexture(const std::string& path, bool srgb)
 {
@@ -239,7 +267,58 @@ Texture* Model::loadTexture(const std::string& path, bool srgb)
 	return texturePtr;
 }
 
+
 bool Model::isLoaded() const
 {
 	return loaded;
+}
+
+void Model::calculateBounds()
+{
+	if (meshes.empty())
+	{
+		boundsMin = glm::vec3(0.0f);
+		boundsMax = glm::vec3(0.0f);
+		return;
+	}
+
+	boundsMin = meshes[0].getBoundsMin();
+
+	boundsMax = meshes[0].getBoundsMax();
+
+	for (const Mesh& mesh : meshes)
+	{
+		boundsMin = glm::min(boundsMin, mesh.getBoundsMin());
+
+		boundsMax = glm::max(boundsMax, mesh.getBoundsMax());
+	}
+}
+
+const glm::vec3& Model::getBoundsMin() const
+{
+	return boundsMin;
+}
+
+
+const glm::vec3& Model::getBoundsMax() const
+{
+	return boundsMax;
+}
+
+
+std::size_t Model::getMaterialCount() const
+{
+	return meshMaterials.size();
+}
+
+
+Material& Model::getMaterial(std::size_t index)
+{
+	return meshMaterials[index];
+}
+
+
+const Material& Model::getMaterial(std::size_t index) const
+{
+	return meshMaterials[index];
 }

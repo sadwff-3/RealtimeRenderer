@@ -26,6 +26,8 @@ public:
     Mesh(Mesh&& other) noexcept;
     Mesh& operator=(Mesh&& other) noexcept;
     void draw() const;
+    const glm::vec3& getBoundsMin() const;
+    const glm::vec3& getBoundsMax() const;
 
 private:
     std::vector<Vertex> vertices;
@@ -34,8 +36,11 @@ private:
     unsigned int VAO;
     unsigned int VBO;
     unsigned int EBO;
+    glm::vec3 boundsMin{ 0.0f };
+    glm::vec3 boundsMax{ 0.0f };
 
     void calculateTangents();
     void setupMesh();
+    void calculateBounds();
 };
    

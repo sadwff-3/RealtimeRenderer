@@ -1,6 +1,8 @@
 #include"Scene.h"
 #include"SceneObject.h"
 
+#include<algorithm>
+
 
 SceneObject& Scene::addObject(const std::string& name, Model* model)
 {
@@ -15,6 +17,22 @@ SceneObject& Scene::addLight(const std::string& name, const Light& light)
 	object.light = light;
 	lightObjects.push_back(&object);
 	return object;
+}
+
+
+bool Scene::removeObject(SceneObject* object)
+{
+	if (object == nullptr)
+		return false;
+
+	auto it = std::find_if(objects.begin(), objects.end(), [object](const std::unique_ptr<SceneObject>& current) {return current.get() == object;});
+
+	if (it == objects.end())
+		return false;
+
+	objects.erase(it);
+
+	return true;
 }
 
 

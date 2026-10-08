@@ -39,6 +39,22 @@ namespace {
         return false;
     }
 
+    void configureAnisotropy(GLint minFilter, GLint magFilter) {
+        GLint major = 0;
+        GLint minor = 0;
+        glGetIntegerv(GL_MAJOR_VERSION, &major);
+        glGetIntegerv(GL_MINOR_VERSION, &minor);
+        if (!(major > 4 || (major == 4 && minor >= 6)) && !hasExtension("GL_EXT_texture_filter_anisotropic") && !hasExtension("GL_ARB_texture_filter_anisotropic")) return;
+
+        // The EXT, ARB and OpenGL 4.6 tokens have identical values.
+        constexpr GLenum textureMaxAnisotropy = 0x84FE;
+        constexpr GLenum maxTextureMaxAnisotropy = 0x84FF;
+        GLfloat maximum = 1.0f;
+        glGetFloatv(maxTextureMaxAnisotropy, &maximum);
+        const bool linear = magFilter == GL_LINEAR && (minFilter == GL_LINEAR || minFilter == GL_LINEAR_MIPMAP_LINEAR || minFilter == GL_LINEAR_MIPMAP_NEAREST);
+        glTexParameterf(GL_TEXTURE_2D, textureMaxAnisotropy, linear ? std::clamp(maximum, 1.0f, 16.0f) : 1.0f);
+    }
+
     // NEW
     void configureTexture(GLuint id, bool mipmaps) {
         glBindTexture(GL_TEXTURE_2D, id);
@@ -46,6 +62,7 @@ namespace {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, mipmaps ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        configureAnisotropy(mipmaps ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR, GL_LINEAR);
     }
 
 } // namespace
@@ -358,6 +375,16 @@ Texture::Texture(unsigned char r, unsigned char g, unsigned char b) {
     glGenTextures(1, &ID);
     configureTexture(ID, false);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, 1, 1, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels);
+}
+
+void Texture::setSampler(int minFilter, int magFilter, int wrapS, int wrapT) {
+    if (!ID) return;
+    glBindTexture(GL_TEXTURE_2D, ID);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, minFilter);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, magFilter);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrapS);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrapT);
+    configureAnisotropy(minFilter, magFilter);
 }
 
 // UNCHANGED

@@ -16,7 +16,7 @@ public:
     ~Renderer();
 
     glm::mat4 renderShadowPass(const Scene& scene);
-    void renderDirectionalShadowPass(const Scene& scene);
+    void renderDirectionalShadowPass(const Scene& scene, const Camera& camera);
     void renderSpotShadowPass(const Scene&scene);
     void renderPointShadowPass(const Scene& scene);
 
@@ -33,6 +33,8 @@ public:
     unsigned int getShadowMap() const;
     unsigned int getSceneColorTexture() const;
     unsigned int getFinalColorTexture() const;
+    unsigned int readObjectID(int x, int y) const;
+    unsigned int readMaterialID(int x, int y) const;
 
 private:
     Shader shadowShader;
@@ -48,6 +50,8 @@ private:
     unsigned int depthMap = 0;
 
     static constexpr int DIRECTIONAL_SHADOW_SIZE = 2048;
+    static constexpr float DIRECTIONAL_SHADOW_HALF_EXTENT = 60.0f;
+    static constexpr float DIRECTIONAL_SHADOW_DEPTH = 240.0f;
     static constexpr int MAX_DIRECTIONAL_SHADOWS = 4;
     static constexpr int POINT_SHADOW_SIZE = 512;
     static constexpr int MAX_POINT_SHADOWS = 4;
@@ -61,6 +65,8 @@ private:
     unsigned int gNormal = 0;
     unsigned int gAlbedo = 0;
     unsigned int gMaterial = 0;
+    unsigned int gObjectID = 0;
+    unsigned int gMaterialID = 0;
     unsigned int gDepth = 0;
     unsigned int ssaoFBO = 0;
     unsigned int ssaoTexture = 0;

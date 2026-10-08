@@ -13,6 +13,12 @@ glm::mat4 Camera::getViewMatrix() const
 }
 
 
+glm::mat4 Camera::getProjectionMatrix(float aspectRatio) const
+{
+    return glm::perspective(glm::radians(Zoom), aspectRatio, NearPlane, FarPlane);
+}
+
+
 void Camera::processKeyboard(CameraMovement direction,float deltaTime)
 {
     float velocity =MovementSpeed * deltaTime;
@@ -35,6 +41,16 @@ void Camera::processKeyboard(CameraMovement direction,float deltaTime)
     if (direction == CameraMovement::Right)
     {
         Position += Right * velocity;
+    }
+
+    if (direction == CameraMovement::Up)
+    {
+        Position += WorldUp * velocity;
+    }
+
+    if (direction == CameraMovement::Down)
+    {
+        Position -= WorldUp * velocity;
     }
 }
 

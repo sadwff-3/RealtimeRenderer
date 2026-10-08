@@ -8,6 +8,7 @@
 #include <glm/gtc/matrix_inverse.hpp>
 
 #include <cstddef>
+#include <cctype>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -159,7 +160,7 @@ void Model::loadGltf(const std::string& path) {
         if (!selected || *selected >= asset.images.size()) return nullptr;
 
         const auto imageIndex = *selected;
-        const auto cacheKey = "gltf:" + std::to_string(imageIndex) + (srgb ? ":srgb" : ":linear");
+        const auto cacheKey = "gltf:" + std::to_string(imageIndex) + (srgb ? ":srgb" : ":linear") + ":sampler:" + (tex.samplerIndex ? std::to_string(*tex.samplerIndex) : "default");
 
         if (const auto it = loadedTextures.find(cacheKey); it != loadedTextures.end()) {
             return it->second.get();
@@ -220,6 +221,13 @@ void Model::loadGltf(const std::string& path) {
             return nullptr;
         }
 
+        if (tex.samplerIndex && *tex.samplerIndex < asset.samplers.size()) {
+            const auto& sampler = asset.samplers[*tex.samplerIndex];
+            const int minFilter = sampler.minFilter ? static_cast<int>(*sampler.minFilter) : 9987;
+            const int magFilter = sampler.magFilter ? static_cast<int>(*sampler.magFilter) : 9729;
+            texture->setSampler(minFilter, magFilter, static_cast<int>(sampler.wrapS), static_cast<int>(sampler.wrapT));
+        }
+
         auto* result = texture.get();
         loadedTextures.emplace(cacheKey, std::move(texture));
         return result;
@@ -278,9 +286,18 @@ void Model::loadGltf(const std::string& path) {
             ? 1.0f
             : m.pbrData.roughnessFactor;
         out.normalYSign = directXNormals ? -1.0f : 1.0f;
-        out.alphaMode = static_cast<int>(m.alphaMode);
+        switch (m.alphaMode) {
+        case fastgltf::AlphaMode::Mask: out.alphaMode = 1; break;
+        case fastgltf::AlphaMode::Blend: out.alphaMode = 2; break;
+        default: out.alphaMode = 0; break;
+        }
+        // This city export labels all materials BLEND; only foliage uses cutout alpha.
+        std::string materialName(m.name);
+        std::transform(materialName.begin(), materialName.end(), materialName.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        const bool cityFoliage = filePath.filename() == "city.glb" && baseDir.filename() == "city" && (materialName.find("leaf") != std::string::npos || materialName.find("leaves") != std::string::npos || materialName.find("foliage") != std::string::npos || materialName.find("grass_blades") != std::string::npos || materialName.find("pink_flower") != std::string::npos || materialName.find("fern_fiddlehead") != std::string::npos || materialName.find("hedge_base") != std::string::npos);
+        if (out.alphaMode == 2 && cityFoliage) out.alphaMode = 1;
         out.doubleSided = m.doubleSided;
-        out.alphaCutoff = m.alphaCutoff;
+        out.alphaCutoff = static_cast<float>(m.alphaCutoff);
 
         return out;
         };

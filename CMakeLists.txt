@@ -116,6 +116,8 @@ add_executable(
     src/AssetManager.cpp
     src/Renderer.cpp
     src/EnvironmentMap.cpp
+    
+    external/ImGuizmo/ImGuizmo.cpp
 )
 
 target_include_directories(
@@ -123,6 +125,7 @@ target_include_directories(
     PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/external/stb
+    ${CMAKE_SOURCE_DIR}/external/ImGuizmo
 )
 
 target_link_libraries(
@@ -135,6 +138,7 @@ target_link_libraries(
     fastgltf::fastgltf
     ktx
     imgui
+    comdlg32
 )
 
 # ---------------- Shaders ----------------

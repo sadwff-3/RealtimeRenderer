@@ -155,6 +155,16 @@ Renderer::~Renderer()
 	{
 		glDeleteFramebuffers(1, &finalFBO);
 	}
+
+	if (gObjectID != 0)
+	{
+		glDeleteTextures(1, &gObjectID);
+	}
+
+	if (gMaterialID != 0)
+	{
+		glDeleteTextures(1, &gMaterialID);
+	}
 }
 
 void Renderer::initDirectionalShadowMaps()
@@ -333,6 +343,26 @@ void Renderer::initGBuffer()
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, gMaterial, 0);
 
+	//ObjectID
+	glGenTextures(1, &gObjectID);
+	glBindTexture(GL_TEXTURE_2D, gObjectID);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, framebufferWidth, framebufferHeight, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, nullptr);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT3, GL_TEXTURE_2D, gObjectID, 0);
+
+	//MaterialID
+	glGenTextures(1, &gMaterialID);
+	glBindTexture(GL_TEXTURE_2D, gMaterialID);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, framebufferWidth, framebufferHeight, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, nullptr);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT4, GL_TEXTURE_2D, gMaterialID, 0);
+
 	// Depth
 	glGenTextures(1, &gDepth);
 	glBindTexture(GL_TEXTURE_2D, gDepth);
@@ -343,14 +373,16 @@ void Renderer::initGBuffer()
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, gDepth, 0);
 
-	unsigned int attachments[3] =
+	unsigned int attachments[5] =
 	{
 		GL_COLOR_ATTACHMENT0,
 		GL_COLOR_ATTACHMENT1,
-		GL_COLOR_ATTACHMENT2
+		GL_COLOR_ATTACHMENT2,
+		GL_COLOR_ATTACHMENT3,
+		GL_COLOR_ATTACHMENT4
 	};
 
-	glDrawBuffers(3, attachments);
+	glDrawBuffers(5, attachments);
 
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
 	{
@@ -463,7 +495,7 @@ void Renderer::initSSAONoiseTexture()
 }
 
 
-void Renderer::renderDirectionalShadowPass(const Scene& scene)
+void Renderer::renderDirectionalShadowPass(const Scene& scene, const Camera& camera)
 {
 	glViewport(0, 0, DIRECTIONAL_SHADOW_SIZE, DIRECTIONAL_SHADOW_SIZE);
 	glBindFramebuffer(GL_FRAMEBUFFER, directionalShadowFBO);
@@ -495,13 +527,20 @@ void Renderer::renderDirectionalShadowPass(const Scene& scene)
 		if (std::abs(glm::dot(direction, up)) > 0.99f)
 			up = glm::vec3(0.0f, 0.0f, 1.0f);
 
-		glm::vec3 lightPos = -direction * 20.0f;
+		const glm::vec3 shadowCenter = camera.Position + camera.Front * (DIRECTIONAL_SHADOW_HALF_EXTENT * 0.5f);
+		glm::vec3 lightPos = shadowCenter - direction * (DIRECTIONAL_SHADOW_DEPTH * 0.5f);
 
-		glm::mat4 lightProjection = glm::ortho(-15.0f, 15.0f, -15.0f, 15.0f, 0.1f, 50.0f);
+		glm::mat4 lightProjection = glm::ortho(-DIRECTIONAL_SHADOW_HALF_EXTENT, DIRECTIONAL_SHADOW_HALF_EXTENT, -DIRECTIONAL_SHADOW_HALF_EXTENT, DIRECTIONAL_SHADOW_HALF_EXTENT, 0.1f, DIRECTIONAL_SHADOW_DEPTH);
 
 		glm::mat4 lightView = glm::lookAt(lightPos, lightPos + direction, up);
 
 		glm::mat4 lightSpaceMatrix = lightProjection * lightView;
+
+		glm::vec4 shadowOrigin = lightSpaceMatrix * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+		glm::vec2 texelOrigin = glm::vec2(shadowOrigin) * (DIRECTIONAL_SHADOW_SIZE * 0.5f);
+		glm::vec2 offset = (glm::round(texelOrigin) - texelOrigin) * (2.0f / DIRECTIONAL_SHADOW_SIZE);
+		lightSpaceMatrix[3][0] += offset.x;
+		lightSpaceMatrix[3][1] += offset.y;
 
 		directionalLightSpaceMatrices[directionalShadowCount] = lightSpaceMatrix;
 
@@ -519,7 +558,7 @@ void Renderer::renderDirectionalShadowPass(const Scene& scene)
 			glm::mat4 model = object->transform.getMatrix();
 
 			shadowShader.setMat4("model", model);
-			object->model->drawGeometry();
+			object->model->drawShadow(shadowShader);
 		}
 
 		++directionalShadowCount;
@@ -584,7 +623,7 @@ void Renderer::renderSpotShadowPass(const Scene& scene)
 			glm::mat4 model = object->transform.getMatrix();
 
 			shadowShader.setMat4("model", model);
-			object->model->drawGeometry();
+			object->model->drawShadow(shadowShader);
 		}
 
 		++spotShadowCount;
@@ -658,7 +697,7 @@ void Renderer::renderPointShadowPass(const Scene& scene)
 				glm::mat4 model = object->transform.getMatrix();
 
 				pointShadowShader.setMat4("model", model);
-				object->model->drawGeometry();
+				object->model->drawShadow(pointShadowShader);
 			}
 		}
 
@@ -676,18 +715,32 @@ void Renderer::renderGeometryPass(const Scene& scene, Camera& camera)
 	glViewport(0, 0, framebufferWidth, framebufferHeight);
 
 	glEnable(GL_DEPTH_TEST);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glClear(GL_DEPTH_BUFFER_BIT);
+	const float clearColor[4] = { 0.0f,0.0f,0.0f,0.0f };
+
+	const unsigned int clearObjectID[1] = { 0 };
+	const unsigned int clearMaterialID[1] = { 0 };
+
+	glClearBufferfv(GL_COLOR, 0, clearColor);
+	glClearBufferfv(GL_COLOR, 1, clearColor);
+	glClearBufferfv(GL_COLOR, 2, clearColor);
+	glClearBufferuiv(GL_COLOR, 3, clearObjectID);
+	glClearBufferuiv(GL_COLOR, 4, clearMaterialID);
 
 	geometryShader.use();
 
 	glm::mat4 view = camera.getViewMatrix();
-	glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight), 0.1f, 100.0f);
+	glm::mat4 projection = camera.getProjectionMatrix(static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight));
 
 	geometryShader.setMat4("view", view);
 	geometryShader.setMat4("projection", projection);
 
-	for (const auto& object : scene.getObjects())
+	const auto& objects = scene.getObjects();
+
+	for (size_t i = 0; i < objects.size(); ++i)
 	{
+		const auto& object = objects[i];
+
 		if (object->model == nullptr)
 		{
 			continue;
@@ -696,6 +749,7 @@ void Renderer::renderGeometryPass(const Scene& scene, Camera& camera)
 		glm::mat4 model = object->transform.getMatrix();
 
 		geometryShader.setMat4("model", model);
+		geometryShader.setInt("objectID", static_cast<int>(i + 1));
 		object->model->draw(geometryShader);
 	}
 
@@ -724,7 +778,7 @@ void Renderer::renderSSAOPass(Mesh& quad, Camera& camera)
 	glBindTexture(GL_TEXTURE_2D, ssaoNoiseTexture);
 
 	glm::mat4 view = camera.getViewMatrix();
-	glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), static_cast<float>(framebufferWidth) / framebufferHeight, 0.1f, 100.0f);
+	glm::mat4 projection = camera.getProjectionMatrix(static_cast<float>(framebufferWidth) / framebufferHeight);
 
 	ssaoShader.setMat4("view", view);
 	ssaoShader.setMat4("projection", projection);
@@ -811,7 +865,7 @@ void Renderer::renderDeferredLightingPass(Mesh& quad, Camera& camera, const Scen
 
 
 	glm::mat4 view = camera.getViewMatrix();
-	glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight), 0.1f, 100.0f);
+	glm::mat4 projection = camera.getProjectionMatrix(static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight));
 
 	glm::mat4 inverseViewProjection = glm::inverse(projection * view);
 
@@ -978,7 +1032,7 @@ void Renderer::renderScenePass(const Scene& scene, Camera& camera, const Directi
 	sceneShader.setVec3("viewPos", camera.Position);
 
 	glm::mat4 view = camera.getViewMatrix();
-	glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight), 0.1f, 100.0f);
+	glm::mat4 projection = camera.getProjectionMatrix(static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight));
 
 	sceneShader.setMat4("view", view);
 	sceneShader.setMat4("projection", projection);
@@ -1051,6 +1105,12 @@ void Renderer::resizeSceneFramebuffer(int width, int height)
 	glBindTexture(GL_TEXTURE_2D, gMaterial);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, framebufferWidth, framebufferHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 
+	glBindTexture(GL_TEXTURE_2D, gObjectID);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, framebufferWidth, framebufferHeight, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, nullptr);
+
+	glBindTexture(GL_TEXTURE_2D, gMaterialID);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, framebufferWidth, framebufferHeight, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, nullptr);
+
 	glBindTexture(GL_TEXTURE_2D, gDepth);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, framebufferWidth, framebufferHeight, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
 
@@ -1084,4 +1144,44 @@ unsigned int Renderer::getSceneColorTexture() const
 unsigned int Renderer::getFinalColorTexture() const
 {
 	return finalColorTexture;
+}
+
+
+unsigned int Renderer::readObjectID(int x, int y) const
+{
+	if (x < 0 || y < 0 || x >= framebufferWidth || y >= framebufferHeight)
+	{
+		return 0;
+	}
+
+	unsigned int objectID = 0;
+	GLint previousReadFramebuffer = 0;
+
+	glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &previousReadFramebuffer);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, gBuffer);
+	glReadBuffer(GL_COLOR_ATTACHMENT3);
+	glReadPixels(x, y, 1, 1, GL_RED_INTEGER, GL_UNSIGNED_INT, &objectID);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, previousReadFramebuffer);
+
+	return objectID;
+}
+
+
+unsigned int Renderer::readMaterialID(int x, int y) const
+{
+	if (x < 0 || y < 0 || x >= framebufferWidth || y >= framebufferHeight)
+	{
+		return 0;
+	}
+
+	unsigned int materialID = 0;
+	GLint previousReadFramebuffer = 0;
+
+	glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &previousReadFramebuffer);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, gBuffer);
+	glReadBuffer(GL_COLOR_ATTACHMENT4);
+	glReadPixels(x, y, 1, 1, GL_RED_INTEGER, GL_UNSIGNED_INT, &materialID);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, previousReadFramebuffer);
+
+	return materialID;
 }

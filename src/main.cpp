@@ -1,3 +1,11 @@
+#ifdef _WIN32
+#include <windows.h>
+#include <commdlg.h>
+#endif
+
+#include <filesystem>
+#include <string>
+
 #include"Shader.h"
 #include"Texture.h"
 #include"Camera.h"
@@ -24,6 +32,8 @@
 #include<imgui_internal.h>
 #include<imgui_impl_glfw.h>
 #include<imgui_impl_opengl3.h>
+#include<ImGuizmo.h>
+
 
 //Camera
 Camera camera;
@@ -32,6 +42,8 @@ float lastY = 360.0f;
 bool firstMouse = true;
 bool viewportHovered = false;
 bool cameraMouseLocked = false;
+bool editMode = false;
+ImGuizmo::OPERATION gizmoOperation = ImGuizmo::TRANSLATE;
 
 //framebuffer size
 int framebufferWidth = 1280;
@@ -96,12 +108,84 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 
 void scroll_callback(GLFWwindow* window,double xoffset,double yoffset)
 {
-    if (ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureMouse)
+    if (!cameraMouseLocked && !viewportHovered)
     {
         return;
     }
 
     camera.processMouseScroll(static_cast<float>(yoffset));
+}
+
+
+std::string openModelFileDialog()
+{
+#ifdef _WIN32
+
+    char filePath[MAX_PATH] = {};
+
+    OPENFILENAMEA dialog = {};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = nullptr;
+    dialog.lpstrFile = filePath;
+    dialog.nMaxFile = MAX_PATH;
+
+    dialog.lpstrFilter = "glTF Models (*.gltf;*.glb)\0" "*.gltf;*.glb\0" "All Files (*.*)\0" "*.*\0";
+
+    dialog.nFilterIndex = 1;
+
+    dialog.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
+
+    if (GetOpenFileNameA(&dialog))
+    {
+        return std::string(filePath);
+    }
+
+#endif
+
+    return {};
+}
+
+
+bool keyPressedOnce(GLFWwindow* window, int key)
+{
+    static bool previousStates[GLFW_KEY_LAST + 1] = {};
+    bool current = glfwGetKey(window, key) == GLFW_PRESS;
+    bool pressed = current && !previousStates[key];
+    previousStates[key] = current;
+    return pressed;
+}
+
+
+void focusSelectedObject(Camera& camera, SceneObject* object, float aspectRatio)
+{
+    if (object == nullptr)
+    {
+        return;
+    }
+
+    AABB bounds;
+
+    if (!object->getWorldBounds(bounds))
+    {
+        return;
+    }
+
+    glm::vec3 center = (bounds.min + bounds.max) * 0.5f;
+    glm::vec3 size = bounds.max - bounds.min;
+    float radius = glm::length(size) * 0.5;
+
+    if (radius < 0.001f)
+    {
+        radius = 1.0f;
+    }
+    float verticalFov = glm::radians(camera.Zoom);
+    float horizontalFov = 2.0f * atan(tan(verticalFov * 0.5f) * aspectRatio);
+    float limitingFov = glm::min(verticalFov, horizontalFov);
+    float distance = radius / tan(limitingFov * 0.5);
+
+    distance *= 1.2f;
+
+    camera.Position = center - camera.Front * distance;
 }
 
 
@@ -172,10 +256,11 @@ int main(int argc, char** argv)
         Scene scene;
 
         SceneObject* selectedObject = nullptr;
+        int selectedMaterialIndex = -1;
 
         Renderer renderer(framebufferWidth, framebufferHeight);
         EnvironmentMap environmentMap;
-        Texture testHDR("assets/apartment/cayley_interior_4k.hdr");
+        Texture testHDR("assets/square/symmetrical_garden_4k.hdr");
 
         if (testHDR.valid())
         {
@@ -186,7 +271,7 @@ int main(int argc, char** argv)
         }
 
         Model* apartment =
-            assets.loadModel("assets/apartment/scene.gltf", true);
+            assets.loadModel("assets/main_sponza/NewSponza_Main_glTF_003.gltf", true);
 
         if (apartment)
         {
@@ -236,7 +321,7 @@ int main(int argc, char** argv)
         directionalLight.castShadow = true;
 
         SceneObject& sun = scene.addLight("Directional Light", directionalLight);
-        sun.transform.rotation = glm::vec3(-29.0f, 59.0f, 0.0f);
+        sun.transform.setEulerDegrees(glm::vec3(-29.0f, 59.0f, 0.0f));
 
         Light spotLight;
         spotLight.type = LightType::Spot;
@@ -249,7 +334,7 @@ int main(int argc, char** argv)
 
         SceneObject& spot = scene.addLight("Test Spotlight", spotLight);
         spot.transform.position = glm::vec3(0.0f, 3.0f, 0.0f);
-        spot.transform.rotation = glm::vec3(-90.0f, 0.0f, 0.0f);
+        spot.transform.setEulerDegrees(glm::vec3(-90.0f, 0.0f, 0.0f));
       
         Light pointLight;
         pointLight.type = LightType::Point;
@@ -271,50 +356,96 @@ int main(int argc, char** argv)
 
             float cameraSpeed = 2.5 * deltaTime;
 
-            if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+            if (keyPressedOnce(window, GLFW_KEY_ESCAPE))
             {
-                glfwSetWindowShouldClose(window, true);
+                if (cameraMouseLocked)
+                {
+                    cameraMouseLocked = false;
+                    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                    firstMouse = true;
+                }
+                else
+                {
+                    glfwSetWindowShouldClose(window, true);
+                }
             }
 
-            if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+            if (!cameraMouseLocked && editMode && viewportHovered)
             {
-                camera.processKeyboard(CameraMovement::Forward, deltaTime);
+                if (keyPressedOnce(window, GLFW_KEY_W))
+                {
+                    gizmoOperation = ImGuizmo::TRANSLATE;
+                }
+
+                if (keyPressedOnce(window, GLFW_KEY_E))
+                {
+                    gizmoOperation = ImGuizmo::ROTATE;
+                }
+
+                if (keyPressedOnce(window, GLFW_KEY_R))
+                {
+                    gizmoOperation = ImGuizmo::SCALE;
+                }
             }
 
-            if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+            if (cameraMouseLocked)
             {
-                camera.processKeyboard(CameraMovement::Backward, deltaTime);
+                float moveDelta = deltaTime;
+
+                if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS)
+                {
+                    moveDelta *= 3.0f;
+                }
+
+                if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+                {
+                    camera.processKeyboard(CameraMovement::Forward, moveDelta);
+                }
+
+                if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+                {
+                    camera.processKeyboard(CameraMovement::Backward, moveDelta);
+                }
+
+                if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+                {
+                    camera.processKeyboard(CameraMovement::Left, moveDelta);
+                }
+
+                if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+                {
+                    camera.processKeyboard(CameraMovement::Right, moveDelta);
+                }
+
+                if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
+                {
+                    camera.processKeyboard(CameraMovement::Up, moveDelta);
+                }
+
+                if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS)
+                {
+                    camera.processKeyboard(CameraMovement::Down, moveDelta);
+                }
+
+                if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS)
+                {
+                    toneMappingMode = 0;
+                }
+
+                if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS)
+                {
+                    toneMappingMode = 1;
+                }
+
+                if (glfwGetKey(window, GLFW_KEY_F1) == GLFW_PRESS) debugView = 0;
+                if (glfwGetKey(window, GLFW_KEY_F2) == GLFW_PRESS) debugView = 1;
+                if (glfwGetKey(window, GLFW_KEY_F3) == GLFW_PRESS) debugView = 2;
+                if (glfwGetKey(window, GLFW_KEY_F4) == GLFW_PRESS) debugView = 3;
+                if (glfwGetKey(window, GLFW_KEY_F5) == GLFW_PRESS) debugView = 4;
+                if (glfwGetKey(window, GLFW_KEY_F6) == GLFW_PRESS) debugView = 5;
+                if (glfwGetKey(window, GLFW_KEY_F7) == GLFW_PRESS) debugView = 6;
+                if (glfwGetKey(window, GLFW_KEY_F8) == GLFW_PRESS) debugView = 7;
             }
-
-            if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-            {
-                camera.processKeyboard(CameraMovement::Left, deltaTime);
-            }
-
-            if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-            {
-                camera.processKeyboard(CameraMovement::Right, deltaTime);
-            }
-
-            if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS)
-            {
-                toneMappingMode = 0;
-            }
-
-            if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS)
-            {
-                toneMappingMode = 1;
-            }
-
-            if (glfwGetKey(window, GLFW_KEY_F1) == GLFW_PRESS) debugView = 0;
-            if (glfwGetKey(window, GLFW_KEY_F2) == GLFW_PRESS) debugView = 1;
-            if (glfwGetKey(window, GLFW_KEY_F3) == GLFW_PRESS) debugView = 2;
-            if (glfwGetKey(window, GLFW_KEY_F4) == GLFW_PRESS) debugView = 3;
-            if (glfwGetKey(window, GLFW_KEY_F5) == GLFW_PRESS) debugView = 4;
-            if (glfwGetKey(window, GLFW_KEY_F6) == GLFW_PRESS) debugView = 5;
-            if (glfwGetKey(window, GLFW_KEY_F7) == GLFW_PRESS) debugView = 6;
-            if (glfwGetKey(window, GLFW_KEY_F8) == GLFW_PRESS) debugView = 7;
-
             if (framebufferWidth == 0 || framebufferHeight == 0)
             {
                 glfwPollEvents();
@@ -324,9 +455,105 @@ int main(int argc, char** argv)
             ImGui_ImplOpenGL3_NewFrame();
             ImGui_ImplGlfw_NewFrame();
             ImGui::NewFrame();
+
+            ImGuizmo::BeginFrame();
+            if (ImGui::BeginMainMenuBar())
+            {
+                if (ImGui::BeginMenu("File"))
+                {
+                    if (ImGui::MenuItem("Import Model..."))
+                    {
+                        std::string path = openModelFileDialog();
+                        
+                        if (!path.empty())
+                        {
+                            Model* model = assets.loadModel(path);
+                            if (model != nullptr)
+                            {
+                                std::filesystem::path filePath(path);
+                                SceneObject& object = scene.addObject(filePath.stem().string(), model);
+                                selectedObject = &object;
+                            }
+                            else
+                            {
+                                std::cerr << "Failed to import model: " << path << '\n';
+                            }
+                        }
+                    }
+                    ImGui::EndMenu();
+                }
+
+                if (ImGui::BeginMenu("Edit"))
+                {
+                    ImGui::MenuItem("Edit Mode", nullptr, &editMode);
+                    ImGui::EndMenu();
+                }
+
+                if (ImGui::BeginMenu("Create"))
+                {
+                    if (ImGui::MenuItem("Directional Light"))
+                    {
+                        static int directionalLightCount = 1;
+
+                        Light light;
+                        light.type = LightType::Directional;
+                        light.color = glm::vec3(1.0f);
+                        light.intensity = 1.0f;
+                        light.castShadow = false;
+
+                        SceneObject& object = scene.addLight("Directional Light " + std::to_string(directionalLightCount++), light);
+                        object.transform.setEulerDegrees(glm::vec3(-45.0f, 45.0f, 0.0f));
+
+                        selectedObject = &object;
+                    }
+
+                    if (ImGui::MenuItem("Point Light"))
+                    {
+                        static int pointLightCount = 1;
+
+                        Light light;
+                        light.type = LightType::Point;
+                        light.color = glm::vec3(1.0f);
+                        light.intensity = 10.0f;
+                        light.range = 10.0f;
+                        light.castShadow = false;
+
+                        SceneObject& object = scene.addLight("Point Light " + std::to_string(pointLightCount++), light);
+
+                        object.transform.position = glm::vec3(0.0f, 2.0f, 0.0f);
+
+                        selectedObject = &object;
+                    }
+
+                    if (ImGui::MenuItem("Spot Light"))
+                    {
+                        static int spotLightCount = 1;
+
+                        Light light;
+                        light.type = LightType::Spot;
+                        light.color = glm::vec3(1.0f);
+                        light.intensity = 10.0f;
+                        light.range = 10.0f;
+                        light.innerAngle = 20.0f;
+                        light.outerAngle = 30.0f;
+                        light.castShadow = false;
+
+                        SceneObject& object = scene.addLight("Spot Light " + std::to_string(spotLightCount++), light);
+
+                        object.transform.position = glm::vec3(0.0f, 2.0f, 0.0f);
+                        object.transform.setEulerDegrees(glm::vec3(-45.0f, 0.0f, 0.0f));
+
+                        selectedObject = &object;
+                    }
+
+                    ImGui::EndMenu();
+                }
+
+                ImGui::EndMainMenuBar();
+            }   
             
          //DirectionalShadowPass
-            renderer.renderDirectionalShadowPass(scene);
+            renderer.renderDirectionalShadowPass(scene, camera);
 
          //SpotShadowPass
             renderer.renderSpotShadowPass(scene);
@@ -410,17 +637,52 @@ int main(int argc, char** argv)
 
             ImGui::End();
 
+            SceneObject* objectToDelete = nullptr;
             ImGui::Begin("Hierarchy");
             for (const auto& object : scene.getObjects())
             {
+                ImGui::PushID(object.get());
                 bool selected = (selectedObject == object.get());
 
                 if (ImGui::Selectable(object->name.c_str(), selected))
                 {
                     selectedObject = object.get();
+                    selectedMaterialIndex = -1;
+
+                    if (editMode && !selectedObject->light.has_value() && viewportRenderWidth > 0 && viewportRenderHeight > 0)
+                    {
+                        float aspectRatio = static_cast<float>(viewportRenderWidth) / static_cast<float>(viewportRenderHeight);
+                        focusSelectedObject(camera, selectedObject, aspectRatio);
+                    }
                 }
+                if (ImGui::BeginPopupContextItem())
+                {
+                    if (ImGui::MenuItem("Delete"))
+                    {
+                        objectToDelete = object.get();
+                    }
+
+                    ImGui::EndPopup();
+                }
+
+                ImGui::PopID();
             }
             ImGui::End();
+            if (selectedObject != nullptr && ImGui::IsKeyPressed(ImGuiKey_Delete) && !ImGui::GetIO().WantTextInput && !ImGui::IsAnyItemActive())
+            {
+                objectToDelete = selectedObject;
+            }
+
+            if (objectToDelete != nullptr)
+            {
+                if (selectedObject == objectToDelete)
+                {
+                    selectedObject = nullptr;
+                    selectedMaterialIndex = -1;
+                }
+
+                scene.removeObject(objectToDelete);
+            }
 
             ImGui::Begin("Viewport");
             viewportHovered = ImGui::IsWindowHovered();
@@ -428,14 +690,73 @@ int main(int argc, char** argv)
             
             int newViewportWidth = static_cast<int>(viewportSize.x);
             int newViewportHeight = static_cast<int>(viewportSize.y);
+
             if (newViewportWidth > 0 && newViewportHeight > 0 && (newViewportWidth != viewportRenderWidth || newViewportHeight != viewportRenderHeight))
             {
-                viewportRenderWidth = newViewportWidth;viewportRenderHeight = newViewportHeight;
-
+                viewportRenderWidth = newViewportWidth;
+                viewportRenderHeight = newViewportHeight;
+                
                 renderer.resizeSceneFramebuffer(viewportRenderWidth, viewportRenderHeight);
             }
 
+            ImVec2 imageMin = ImGui::GetCursorScreenPos();
+
             ImGui::Image((ImTextureID)(intptr_t)renderer.getFinalColorTexture(), viewportSize, ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
+            
+            if (selectedObject != nullptr && editMode && viewportSize.x > 0.0f && viewportSize.y > 0.0f && !cameraMouseLocked)
+            {
+                ImGuizmo::SetOrthographic(false);
+                ImGuizmo::SetDrawlist(ImGui::GetWindowDrawList());
+                ImGuizmo::SetRect(imageMin.x, imageMin.y, viewportSize.x, viewportSize.y);
+                
+                glm::mat4 view = camera.getViewMatrix();
+                glm::mat4 projection = camera.getProjectionMatrix(viewportSize.x / viewportSize.y);
+                glm::mat4 model = selectedObject->transform.getMatrix();
+
+                ImGuizmo::MODE gizmoMode = gizmoOperation == ImGuizmo::SCALE ? ImGuizmo::LOCAL : ImGuizmo::WORLD;
+
+                ImGuizmo::Manipulate(glm::value_ptr(view), glm::value_ptr(projection), gizmoOperation, gizmoMode, glm::value_ptr(model));
+
+                if (ImGuizmo::IsUsing())
+                {
+                    selectedObject->transform.setFromMatrix(model);
+                }
+                
+            }
+
+            if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !cameraMouseLocked && !ImGuizmo::IsOver() && !ImGuizmo::IsUsing())
+            {
+                ImVec2 mousePos = ImGui::GetMousePos();
+                float localX = mousePos.x - imageMin.x;
+                float localY = mousePos.y - imageMin.y;
+                int pixelX = static_cast<int>(localX / viewportSize.x * viewportRenderWidth);
+                int pixelY = viewportRenderHeight - 1 - static_cast<int>(localY / viewportSize.y * viewportRenderHeight);
+                unsigned int objectID = renderer.readObjectID(pixelX, pixelY);
+                unsigned int materialID = renderer.readMaterialID(pixelX, pixelY);
+                const auto& objects = scene.getObjects();
+
+                if (objectID > 0 && objectID <= objects.size())
+                {
+                    selectedObject = objects[objectID - 1].get();
+                    selectedMaterialIndex = -1;
+
+                    if (selectedObject->model != nullptr && materialID > 0)
+                    {
+                        std::size_t index = static_cast<std::size_t>(materialID - 1);
+
+                        if (index < selectedObject->model->getMaterialCount())
+                        {
+                            selectedMaterialIndex = static_cast<int>(index);
+                        }
+                    }
+                }
+                else
+                {
+                    selectedObject = nullptr;
+                    selectedMaterialIndex = -1;
+                }
+            }
+
             ImGui::End();
 
             ImGui::Begin("Inspector");
@@ -445,7 +766,13 @@ int main(int argc, char** argv)
                 ImGui::Separator();
                 ImGui::TextUnformatted("Transform");
                 ImGui::DragFloat3("Position", &selectedObject->transform.position.x, 0.05f);
-                ImGui::DragFloat3("Rotation", &selectedObject->transform.rotation.x, 0.5f);
+                glm::vec3 eulerDegrees = selectedObject->transform.getEulerDegrees();
+
+                if (ImGui::DragFloat3("Rotation", &eulerDegrees.x, 0.5f))
+                {
+                    selectedObject->transform.setEulerDegrees(eulerDegrees);
+                }
+
                 ImGui::DragFloat3("Scale", &selectedObject->transform.scale.x, 0.05f);
 
                 if (selectedObject->light.has_value())
@@ -458,7 +785,7 @@ int main(int argc, char** argv)
                     ImGui::ColorEdit3("Color", &light.color.x);
                     ImGui::DragFloat("Intensity", &light.intensity, 0.1f, 0.0f, 100.0f);
                     
-                if (light.type == LightType::Point || light.type == LightType::Spot)
+                    if (light.type == LightType::Point || light.type == LightType::Spot)
                     {
                         ImGui::DragFloat("Range", &light.range, 0.1f, 0.1f, 100.0f);
                     }
@@ -468,6 +795,73 @@ int main(int argc, char** argv)
                         ImGui::DragFloat("Inner Angle", &light.innerAngle, 0.5f, 0.0f, 90.0f);
                         ImGui::DragFloat("Outer Angle", &light.outerAngle, 0.5f, 0.0f, 90.0f);
                     }
+                    ImGui::Checkbox("Cast Shadow", &light.castShadow);
+                }
+
+                if (selectedObject->model != nullptr)
+                {
+                    ImGui::Separator();
+                    ImGui::TextUnformatted("Material");
+
+                    std::size_t materialCount = selectedObject->model->getMaterialCount();
+                    std::string materialPreview = "None";
+
+                    if (selectedMaterialIndex >= 0 && static_cast<std::size_t>(selectedMaterialIndex) < materialCount)
+                    {
+                        materialPreview = "Materail" + std::to_string(selectedMaterialIndex);
+                    }
+                    if (ImGui::BeginCombo("Material Slot", materialPreview.c_str()))
+                    {
+                        for (std::size_t i = 0; i < materialCount; ++i)
+                        {
+                            bool selected = selectedMaterialIndex == static_cast<int>(i);
+                            std::string label = "Material" + std::to_string(i);
+
+                            if (ImGui::Selectable(label.c_str(), selected))
+                            {
+                                selectedMaterialIndex = static_cast<int>(i);
+                            }
+
+                            if (selected)
+                            {
+                                ImGui::SetItemDefaultFocus();
+                            }
+                        }
+
+                        ImGui::EndCombo();
+                    }
+
+                    if (selectedMaterialIndex >= 0 && static_cast<std::size_t>(selectedMaterialIndex) < materialCount)
+                    {
+                        Material& material = selectedObject->model->getMaterial(static_cast<std::size_t>(selectedMaterialIndex));
+
+                        ImGui::ColorEdit4("Base Color", &material.baseColorFactor.x);
+                        ImGui::SliderFloat("Metallic", &material.metallicFactor, 0.0f, 1.0f);
+                        ImGui::SliderFloat("Roughness", &material.roughnessFactor, 0.0f, 1.0f);
+                        ImGui::Checkbox("Double Sided", &material.doubleSided);
+                        ImGui::Combo("Alpha Mode", &material.alphaMode, "Opaque\0Mask\0Blend (unsupported)\0");
+
+                        if (material.alphaMode == 1)
+                        {
+                            ImGui::SliderFloat("Alpha Cutoff", &material.alphaCutoff, 0.0f, 1.0f);
+                        }
+                    }
+                    else
+                    {
+                        ImGui::TextDisabled("Click a surface in the Viewport to select its material.");
+                    }
+                }
+
+                ImGui::Separator();
+
+                if (ImGui::Button("Delete Object"))
+                {
+                    SceneObject* objectToDelete = selectedObject;
+
+                    selectedObject = nullptr;
+                    selectedMaterialIndex = -1;
+
+                    scene.removeObject(objectToDelete);
                 }
             }
             else

@@ -29,3 +29,13 @@ assets/models/
 assets/commercial_refrigerator/
 assets/flight_helmet/
 assets/sponza_pbr/
+
+# Assets
+assets/
+
+# External libraries
+external/
+
+# Build
+out/
+.vs/

@@ -8,6 +8,12 @@
 
 class Model;
 
+struct AABB
+{
+    glm::vec3 min;
+    glm::vec3 max;
+};
+
 class SceneObject
 {
 public:
@@ -18,4 +24,6 @@ public:
     std::optional<Light> light;
 
     SceneObject(const std::string& name, Model* model);
+
+    bool getWorldBounds(AABB& outBounds) const;
 };
