@@ -136,14 +136,16 @@ void Model::loadGltf(const std::string& path) {
         fastgltf::Extensions::KHR_texture_basisu |
         fastgltf::Extensions::KHR_materials_specular |
         fastgltf::Extensions::KHR_materials_transmission |
-        fastgltf::Extensions::KHR_texture_transform
+        fastgltf::Extensions::KHR_texture_transform |
+        fastgltf::Extensions::KHR_lights_punctual |
+        fastgltf::Extensions::KHR_materials_emissive_strength
     );
 
     const auto options = fastgltf::Options::LoadExternalBuffers | fastgltf::Options::LoadGLBBuffers;
     auto parsed = parser.loadGltf(input.get(), baseDir, options);
 
     if (parsed.error() != fastgltf::Error::None) {
-        std::cerr << "fastgltf: parse error " << static_cast<int>(parsed.error()) << " in " << path << '\n';
+        std::cerr << "fastgltf: parse error " << static_cast<int>(parsed.error()) << " (" << fastgltf::getErrorName(parsed.error()) << "): " << fastgltf::getErrorMessage(parsed.error()) << " in " << path << '\n';
         return;
     }
 
@@ -271,6 +273,15 @@ void Model::loadGltf(const std::string& path) {
         }
 
         Material out(color, normal, mr, mr, ao);
+
+        out.emissiveFactor = glm::vec3(m.emissiveFactor[0], m.emissiveFactor[1], m.emissiveFactor[2]);
+        out.emissiveStrength = static_cast<float>(m.emissiveStrength);
+
+        if (m.emissiveTexture)
+        {
+            out.emissiveMap = loadGltfTexture(m.emissiveTexture->textureIndex, true);
+        }
+
         const auto& factor = m.pbrData.baseColorFactor;
 
         out.baseColorFactor = glm::vec4(factor[0], factor[1], factor[2], factor[3]);
@@ -519,7 +530,14 @@ void Model::loadGltf(const std::string& path) {
                     continue;
                 }
 
-                meshMaterials.push_back(makeMaterial(primitive.materialIndex));
+                Material material = makeMaterial(primitive.materialIndex);
+                // This export has coincident front/back floor primitives with different materials.
+                // They must face their own side instead of both rendering as double-sided.
+                if (filePath.filename() == "city.glb" && baseDir.filename() == "city" && std::string(node.name).rfind("GroundPlane", 0) == 0 && asset.meshes[*node.meshIndex].primitives.size() == 2 && vertices.size() == 4 && indices.size() == 6 && primitive.materialIndex) {
+                    const std::string materialName(asset.materials[*primitive.materialIndex].name);
+                    if (materialName.rfind("Floor", 0) == 0 || materialName.rfind("WorldGridMaterial", 0) == 0) material.doubleSided = false;
+                }
+                meshMaterials.push_back(material);
 
                 meshes.emplace_back(vertices, indices, hasTangents);
             }

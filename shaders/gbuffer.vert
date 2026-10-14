@@ -8,10 +8,14 @@ layout (location = 4) in vec3 aBitangent;
 
 out vec2 TexCoord;
 out mat3 TBN;
+out vec4 CurrentClip;
+out vec4 PreviousClip;
 
 uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
+uniform mat4 previousModel;
+uniform mat4 previousViewProjection;
 
 
 vec3 fallbackTangent(vec3 N)
@@ -48,5 +52,8 @@ void main()
 
     TexCoord = aTexCoord;
 
-    gl_Position = projection * view * worldPos;
+    CurrentClip = projection * view * worldPos;
+    PreviousClip = previousViewProjection * previousModel * vec4(aPos, 1.0);
+
+    gl_Position = CurrentClip;
 }

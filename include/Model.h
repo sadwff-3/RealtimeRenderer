@@ -21,6 +21,7 @@ public:
     void draw(Shader& shader) const;
     void drawGeometry() const;
     void drawShadow(Shader& shader) const;
+    void drawShadowCulled(Shader& shader, const glm::mat4& localTOShadowClip, float clipMargin) const;
 
     bool isLoaded() const;
 

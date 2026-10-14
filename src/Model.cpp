@@ -1,10 +1,11 @@
 #include"Model.h"
-#include <assimp/Importer.hpp>
-#include <assimp/postprocess.h>
-#include <iostream>
-#include <algorithm>
-#include <cctype>
-#include <filesystem>
+#include<assimp/Importer.hpp>
+#include<assimp/postprocess.h>
+#include<iostream>
+#include<algorithm>
+#include<cctype>
+#include<filesystem>
+#include<cmath>
 
 
 static glm::mat4 aiMatrixToGlm(const aiMatrix4x4& m)
@@ -87,6 +88,52 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene, const glm::mat4& tra
 	Texture* roughnessTexture = defaultRoughness.get();
 	Texture* aoTexture = defaultAO.get();
 
+    // Assimp's *N paths refer to images embedded in the scene, not disk files.
+    auto loadMaterialTexture = [&](const aiString& imagePath, bool srgb, Texture* fallback) -> Texture* {
+        const aiTexture* embedded = scene->GetEmbeddedTexture(imagePath.C_Str());
+        if (!embedded) {
+            if (imagePath.C_Str()[0] == '*') {
+                std::cerr << "Invalid Assimp embedded texture: " << imagePath.C_Str() << '\n';
+                return fallback;
+            }
+            Texture* texture = loadTexture(directory + "/" + imagePath.C_Str(), srgb);
+            return texture && texture->valid() ? texture : fallback;
+        }
+        const std::string key = "assimp:" + directory + ":" + imagePath.C_Str() + (srgb ? ":srgb" : ":linear");
+        if (const auto found = loadedTextures.find(key); found != loadedTextures.end()) {
+            return found->second.get();
+        }
+        if (!embedded->pcData || embedded->mWidth == 0) return fallback;
+        std::unique_ptr<Texture> texture;
+        if (embedded->mHeight == 0) {
+            texture = std::make_unique<Texture>(reinterpret_cast<const std::uint8_t*>(embedded->pcData),
+                static_cast<std::size_t>(embedded->mWidth), srgb, false);
+        } else {
+            // Encode raw Assimp BGRA texels as a top-origin, uncompressed TGA in memory.
+            // Reuse the existing image decoder and GPU upload path.
+            const std::size_t width = embedded->mWidth, height = embedded->mHeight;
+            if (width > 65535 || height > 65535 || width * height > (2147483647u - 18u) / 4u) {
+                std::cerr << "Assimp embedded image is too large\n";
+                return fallback;
+            }
+            std::vector<std::uint8_t> bytes(18 + width * height * 4, 0);
+            bytes[2] = 2;
+            bytes[12] = static_cast<std::uint8_t>(width); bytes[13] = static_cast<std::uint8_t>(width >> 8);
+            bytes[14] = static_cast<std::uint8_t>(height); bytes[15] = static_cast<std::uint8_t>(height >> 8);
+            bytes[16] = 32; bytes[17] = 0x28;
+            for (std::size_t i = 0; i < width * height; ++i) {
+                const aiTexel& pixel = embedded->pcData[i];
+                bytes[18 + i * 4] = pixel.b; bytes[19 + i * 4] = pixel.g;
+                bytes[20 + i * 4] = pixel.r; bytes[21 + i * 4] = pixel.a;
+            }
+            texture = std::make_unique<Texture>(bytes.data(), bytes.size(), srgb, false);
+        }
+        if (!texture || !texture->valid()) return fallback;
+        Texture* result = texture.get();
+        loadedTextures.emplace(key, std::move(texture));
+        return result;
+    };
+
 	if (mesh->mMaterialIndex < scene->mNumMaterials)
 	{
 		aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];
@@ -99,8 +146,7 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene, const glm::mat4& tra
 			aiString texturePath;
 			material->GetTexture(aiTextureType_BASE_COLOR, 0, &texturePath);
 
-			std::string fullPath = directory + "/" + texturePath.C_Str();
-			diffuseTexture = loadTexture(fullPath, true);
+			diffuseTexture = loadMaterialTexture(texturePath, true, defaultDiffuse.get());
 		}
 
 		else if (diffuseCount > 0)
@@ -108,8 +154,7 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene, const glm::mat4& tra
 			aiString texturePath;
 			material->GetTexture(aiTextureType_DIFFUSE, 0, &texturePath);
 
-			std::string fullPath = directory + "/" + texturePath.C_Str();
-			diffuseTexture = loadTexture(fullPath, true);
+			diffuseTexture = loadMaterialTexture(texturePath, true, defaultDiffuse.get());
 		}
 
 		unsigned int normalCount = material->GetTextureCount(aiTextureType_NORMALS);
@@ -120,16 +165,14 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene, const glm::mat4& tra
 			aiString normalPath;
 			material->GetTexture(aiTextureType_NORMALS, 0, &normalPath);
 
-			std::string fullNormalPath = directory + "/" + normalPath.C_Str();
-			normalTexture = loadTexture(fullNormalPath, false);
+			normalTexture = loadMaterialTexture(normalPath, false, defaultNormal.get());
 		}
 		else if (heightCount > 0)
 		{
 			aiString normalPath;
 			material->GetTexture(aiTextureType_HEIGHT, 0, &normalPath);
 
-			std::string fullNormalPath = directory + "/" + normalPath.C_Str();
-			normalTexture = loadTexture(fullNormalPath, false);
+			normalTexture = loadMaterialTexture(normalPath, false, defaultNormal.get());
 		}
 
 		unsigned int metallicCount = material->GetTextureCount(aiTextureType_METALNESS);
@@ -139,8 +182,7 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene, const glm::mat4& tra
 			aiString metallicPath;
 			material->GetTexture(aiTextureType_METALNESS, 0, &metallicPath);
 
-			std::string fullMetallicPath = directory + "/" + metallicPath.C_Str();
-			metallicTexture = loadTexture(fullMetallicPath, false);
+			metallicTexture = loadMaterialTexture(metallicPath, false, defaultMetallic.get());
 		}
 
 		unsigned int roughnessCount = material->GetTextureCount(aiTextureType_DIFFUSE_ROUGHNESS);
@@ -150,8 +192,7 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene, const glm::mat4& tra
 			aiString roughnessPath;
 			material->GetTexture(aiTextureType_DIFFUSE_ROUGHNESS, 0, &roughnessPath);
 
-			std::string fullRoughnessPath = directory + "/" + roughnessPath.C_Str();
-			roughnessTexture = loadTexture(fullRoughnessPath, false);
+			roughnessTexture = loadMaterialTexture(roughnessPath, false, defaultRoughness.get());
 		}
 
 		unsigned int aoCount = material->GetTextureCount(aiTextureType_AMBIENT_OCCLUSION);
@@ -161,8 +202,7 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene, const glm::mat4& tra
 			aiString aoPath;
 			material->GetTexture(aiTextureType_AMBIENT_OCCLUSION, 0, &aoPath);
 
-			std::string fullAOPath = directory + "/" + aoPath.C_Str();
-			aoTexture = loadTexture(fullAOPath, false);
+			aoTexture = loadMaterialTexture(aoPath, false, defaultAO.get());
 		}
 	
 	}
@@ -210,13 +250,116 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene, const glm::mat4& tra
 
 void Model::draw(Shader& shader) const
 {
+	const GLboolean previousCull = glIsEnabled(GL_CULL_FACE);
+	GLint previousCullMode = GL_BACK;
+	glGetIntegerv(GL_CULL_FACE_MODE, &previousCullMode);
+	glCullFace(GL_BACK);
+
+	shader.use();
+
+	const char* uniformNames[] =
+	{
+		"materialID",
+		"baseColorFactor",
+		"metallicFactor",
+		"roughnessFactor",
+		"normalYSign",
+		"alphaMode",
+		"doubleSided",
+		"alphaCutoff",
+		"albedoMap",
+		"normalMap",
+		"metallicMap",
+		"roughnessMap",
+		"aoMap",
+		"emissiveFactor",
+		"emissiveStrength",
+		"emissiveMap",
+		"hasEmissiveMap"
+	};
+
+	GLint locations[17];
+
+	for (int i = 0; i < 17; ++i)
+		locations[i] = glGetUniformLocation(shader.ID, uniformNames[i]);
+
+	const int textureUnits[] = { 0, 1, 3, 4, 5 };
+
+	for (int i = 0; i < 5; ++i)
+		glUniform1i(locations[8 + i], textureUnits[i]);
+
+	glUniform1i(locations[15], 6);
+
+	Texture* lastTextures[5] = {};
+	int lastDoubleSided = -1;
 
 	for (std::size_t i = 0; i < meshes.size(); ++i)
 	{
-		shader.setInt("materialID", static_cast<int>(i + 1));
-		meshMaterials[i].bind(shader);
+		const Material& material = meshMaterials[i];
+		const int doubleSided = material.doubleSided ? 1 : 0;
+
+		if (lastDoubleSided != doubleSided)
+		{
+			if (material.doubleSided)
+				glDisable(GL_CULL_FACE);
+			else
+				glEnable(GL_CULL_FACE);
+
+			lastDoubleSided = doubleSided;
+		}
+
+		// 保留每个 mesh 的材质 ID 和全部材质参数更新。
+		glUniform1i(locations[0], static_cast<int>(i + 1));
+		glUniform4fv(locations[1], 1, &material.baseColorFactor.x);
+		glUniform1f(locations[2], material.metallicFactor);
+		glUniform1f(locations[3], material.roughnessFactor);
+		glUniform1f(locations[4], material.normalYSign);
+		glUniform1i(locations[5], material.alphaMode);
+		glUniform1i(locations[6], doubleSided);
+		glUniform1f(locations[7], material.alphaCutoff);
+		glUniform3fv(locations[13], 1, &material.emissiveFactor.x);
+		glUniform1f(locations[14], material.emissiveStrength);
+		glUniform1i(locations[16], material.emissiveMap ? 1 : 0);
+
+		Texture* textures[] =
+		{
+			material.albedo,
+			material.normalMap,
+			material.metallicMap,
+			material.roughnessMap,
+			material.aoMap
+		};
+
+		for (int slot = 0; slot < 5; ++slot)
+		{
+			if (lastTextures[slot] != textures[slot])
+			{
+				glActiveTexture(GL_TEXTURE0 + textureUnits[slot]);
+				textures[slot]->bind();
+				lastTextures[slot] = textures[slot];
+			}
+		}
+
+		glActiveTexture(GL_TEXTURE6);
+
+		if (material.emissiveMap)
+		{
+			material.emissiveMap->bind();
+		}
+		else
+		{
+			glBindTexture(GL_TEXTURE_2D, 0);
+		}
+
 		meshes[i].draw();
 	}
+
+	glCullFace(previousCullMode);
+
+	if (previousCull)
+		glEnable(GL_CULL_FACE);
+	else
+		glDisable(GL_CULL_FACE);
 }
 
 
@@ -234,6 +377,68 @@ void Model::drawShadow(Shader& shader) const
 			glActiveTexture(GL_TEXTURE0);
 			material.albedo->bind();
 		}
+		meshes[i].draw();
+	}
+}
+
+
+static bool outsideShadow(const Mesh& mesh, const glm::mat4& localToShadowClip, float clipMargin)
+{
+    const glm::vec3 center = (mesh.getBoundsMin() + mesh.getBoundsMax()) * 0.5f;
+    const glm::vec3 extent = (mesh.getBoundsMax() - mesh.getBoundsMin()) * 0.5f;
+    const float limit = 1.0f + clipMargin;
+    const glm::vec4 rowW(localToShadowClip[0][3], localToShadowClip[1][3], localToShadowClip[2][3], localToShadowClip[3][3]);
+
+    // Test homogeneous side planes: -limit*w <= x,y <= limit*w.
+    // Keep depth unconstrained for CSM casters; this also handles perspective point-light faces.
+    for (int axis = 0; axis < 2; ++axis)
+    {
+        const glm::vec4 rowAxis(localToShadowClip[0][axis], localToShadowClip[1][axis], localToShadowClip[2][axis], localToShadowClip[3][axis]);
+        for (float sign : { -1.0f, 1.0f })
+        {
+            const glm::vec4 plane = limit * rowW + sign * rowAxis;
+            const float distance = glm::dot(glm::vec3(plane), center) + plane.w;
+            const float radius = glm::dot(glm::abs(glm::vec3(plane)), extent);
+            if (distance + radius < 0.0f) return true;
+        }
+    }
+    return false;
+}
+
+
+void Model::drawShadowCulled(Shader& shader, const glm::mat4& localToShadowClip, float clipMargin) const
+{
+	shader.setInt("albedoMap", 0);
+
+	const GLint alphaModeLocation = glGetUniformLocation(shader.ID, "alphaMode");
+	const GLint alphaCutoffLocation = glGetUniformLocation(shader.ID, "alphaCutoff");
+	const GLint baseColorLocation = glGetUniformLocation(shader.ID, "baseColorFactor");
+
+	int lastAlphaMode = -1;
+
+	for (std::size_t i = 0; i < meshes.size(); ++i)
+	{
+		if (outsideShadow(meshes[i], localToShadowClip, clipMargin))
+			continue;
+
+		const Material& material = meshMaterials[i];
+
+		if (lastAlphaMode != material.alphaMode)
+		{
+			glUniform1i(alphaModeLocation, material.alphaMode);
+			lastAlphaMode = material.alphaMode;
+		}
+
+		// 阴影 Shader 只有透明裁切材质才需要这些参数和纹理。
+		if (material.alphaMode == 1)
+		{
+			glUniform1f(alphaCutoffLocation, material.alphaCutoff);
+			glUniform4fv(baseColorLocation, 1, &material.baseColorFactor.x);
+
+			glActiveTexture(GL_TEXTURE0);
+			material.albedo->bind();
+		}
+
 		meshes[i].draw();
 	}
 }
@@ -273,6 +478,7 @@ bool Model::isLoaded() const
 	return loaded;
 }
 
+
 void Model::calculateBounds()
 {
 	if (meshes.empty())
@@ -293,6 +499,7 @@ void Model::calculateBounds()
 		boundsMax = glm::max(boundsMax, mesh.getBoundsMax());
 	}
 }
+
 
 const glm::vec3& Model::getBoundsMin() const
 {

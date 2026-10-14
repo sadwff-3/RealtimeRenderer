@@ -260,7 +260,7 @@ int main(int argc, char** argv)
 
         Renderer renderer(framebufferWidth, framebufferHeight);
         EnvironmentMap environmentMap;
-        Texture testHDR("assets/square/symmetrical_garden_4k.hdr");
+        Texture testHDR("assets/neoncity/symmetrical_garden_4k.hdr");
 
         if (testHDR.valid())
         {
@@ -270,11 +270,13 @@ int main(int argc, char** argv)
             environmentMap.generateBRDFLUT();
         }
 
-        Model* apartment =
-            assets.loadModel("assets/main_sponza/NewSponza_Main_glTF_003.gltf", true);
+        Model* apartment = assets.loadModel("assets/neoncity/medieval_tavern_kit.glb", true);
 
         if (apartment)
         {
+            // Scene-specific night exposure for signs; keep the imported glTF factors intact.
+            for (std::size_t i = 0; i < apartment->getMaterialCount(); ++i)
+                apartment->getMaterial(i).emissiveStrength *= 0.65f;
             scene.addObject("Apartment", apartment);
         }
         else
@@ -316,35 +318,33 @@ int main(int argc, char** argv)
         
         Light directionalLight;
         directionalLight.type = LightType::Directional;
-        directionalLight.color = glm::vec3(1.0f);
-        directionalLight.intensity = 1.0f;
+        directionalLight.color = glm::vec3(0.55f, 0.65f, 1.0f);
+        directionalLight.intensity = 0.02f;
         directionalLight.castShadow = true;
 
         SceneObject& sun = scene.addLight("Directional Light", directionalLight);
         sun.transform.setEulerDegrees(glm::vec3(-29.0f, 59.0f, 0.0f));
 
-        Light spotLight;
-        spotLight.type = LightType::Spot;
-        spotLight.color = glm::vec3(1.0f, 0.95f, 0.8f);
-        spotLight.intensity = 15.0f;
-        spotLight.range = 12.0f;
-        spotLight.innerAngle = 25.0f;
-        spotLight.outerAngle = 35.0f;
-        spotLight.castShadow = true;
+        // Art-directed lights approximate nearby neon illumination; Emissive itself does not light other objects.
+        auto addNightPoint = [&](const char* name, glm::vec3 position, glm::vec3 color, float intensity, float range)
+        {
+            Light light;
+            light.type = LightType::Point;
+            light.color = color;
+            light.intensity = intensity;
+            light.range = range;
+            light.castShadow = true;
+            scene.addLight(name, light).transform.position = position;
+        };
 
-        SceneObject& spot = scene.addLight("Test Spotlight", spotLight);
-        spot.transform.position = glm::vec3(0.0f, 3.0f, 0.0f);
-        spot.transform.setEulerDegrees(glm::vec3(-90.0f, 0.0f, 0.0f));
-      
-        Light pointLight;
-        pointLight.type = LightType::Point;
-        pointLight.color = glm::vec3(1.0f);
-        pointLight.intensity = 20.0f;
-        pointLight.range = 10.0f;
-        pointLight.castShadow = true;
+        addNightPoint("Night - Cyan upper alley", glm::vec3(-2.0f, -15.0f, -18.0f), glm::vec3(0.035f, 0.45f, 1.0f), 28.0f, 65.0f);
+        addNightPoint("Night - Cyan lower alley", glm::vec3(-8.0f, -65.0f, -55.0f), glm::vec3(0.025f, 0.55f, 1.0f), 45.0f, 90.0f);
+        addNightPoint("Night - Amber sign", glm::vec3(-10.0f, -25.0f, -8.0f), glm::vec3(1.0f, 0.20f, 0.035f), 18.0f, 35.0f);
+        addNightPoint("Night - Magenta sign", glm::vec3(-2.0f, -35.0f, -42.0f), glm::vec3(1.0f, 0.035f, 0.24f), 16.0f, 40.0f);
+        renderer.bloom.intensity = 0.10f;
 
-        SceneObject& point = scene.addLight("Test Point Light", pointLight);
-        point.transform.position = glm::vec3(0.0f, 3.0f, 0.0f);
+
+        
 
 
         while (!glfwWindowShouldClose(window))
@@ -445,6 +445,9 @@ int main(int argc, char** argv)
                 if (glfwGetKey(window, GLFW_KEY_F6) == GLFW_PRESS) debugView = 5;
                 if (glfwGetKey(window, GLFW_KEY_F7) == GLFW_PRESS) debugView = 6;
                 if (glfwGetKey(window, GLFW_KEY_F8) == GLFW_PRESS) debugView = 7;
+                if (glfwGetKey(window, GLFW_KEY_F9) == GLFW_PRESS) debugView = 8;
+                if (glfwGetKey(window, GLFW_KEY_F10) == GLFW_PRESS) debugView = 9;
+                if (glfwGetKey(window, GLFW_KEY_F11) == GLFW_PRESS) debugView = 10;
             }
             if (framebufferWidth == 0 || framebufferHeight == 0)
             {
@@ -549,8 +552,50 @@ int main(int argc, char** argv)
                     ImGui::EndMenu();
                 }
 
+                if (ImGui::BeginMenu("Rendering"))
+                {
+                    if (ImGui::MenuItem("TAA", nullptr, renderer.isTAAEnabled()))
+                        renderer.setTAAEnabled(!renderer.isTAAEnabled());
+
+                    if (ImGui::BeginMenu("Point Lights"))
+                    {
+                        ImGui::SliderInt("Shadow Budget", &renderer.pointShadowBudget, 0, 4);
+                        ImGui::TextUnformatted("0: lighting only; 1: recommended; 4: highest cost");
+                        for (SceneObject* object : scene.getLights())
+                        {
+                            if (!object->light || object->light->type != LightType::Point) continue;
+                            Light& light = *object->light;
+                            ImGui::PushID(object);
+                            ImGui::Separator();
+                            ImGui::TextUnformatted(object->name.c_str());
+                            ImGui::DragFloat("Intensity", &light.intensity, 0.1f, 0.0f, 100.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp);
+                            ImGui::Checkbox("Cast Shadow", &light.castShadow);
+                            ImGui::PopID();
+                        }
+                        ImGui::EndMenu();
+                    }
+
+                    ImGui::Checkbox("Bloom", &renderer.bloom.enabled);
+                    ImGui::SliderFloat("Bloom Intensity", &renderer.bloom.intensity, 0.0f, 1.0f, "%.3f");
+                    ImGui::DragFloat("Bloom Threshold (HDR)", &renderer.bloom.threshold, 0.05f, 0.0f, 100.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+                    ImGui::SliderFloat("Bloom Soft Knee", &renderer.bloom.softKnee, 0.0f, 1.0f);
+
+                    if (ImGui::MenuItem("Final image (F1)"))
+                        debugView = 0;
+
+                    if (ImGui::MenuItem("Emissive only (F10)"))
+                        debugView = 9;
+
+                    if (ImGui::MenuItem("Bloom only (F11)"))
+                        debugView = 10;
+
+                    ImGui::EndMenu();
+                }
+
                 ImGui::EndMainMenuBar();
-            }   
+            }
+         
+            renderer.beginTAAFrame(camera);
             
          //DirectionalShadowPass
             renderer.renderDirectionalShadowPass(scene, camera);
@@ -569,7 +614,14 @@ int main(int argc, char** argv)
             renderer.renderSSAOBlurPass(debugQuad);
 
          //DeferredLightingPass
-            renderer.renderDeferredLightingPass(debugQuad, camera, scene, debugView, environmentMap.getCubemap(), environmentMap.getIrradianceMap(), environmentMap.getPrefilterMap(), environmentMap.getBRDFLUT());
+            int lightingDebugView = debugView == 10 ? 0 : debugView;
+            renderer.renderDeferredLightingPass(debugQuad, camera, scene, lightingDebugView, environmentMap.getCubemap(), environmentMap.getIrradianceMap(), environmentMap.getPrefilterMap(), environmentMap.getBRDFLUT());
+
+         //TaaPass
+            renderer.renderTAAPass(debugQuad, lightingDebugView);
+
+         //BloomPass
+            renderer.renderBloomPass(debugQuad, debugView);
 
          //ScreenPass
             renderer.renderScreenPass(debugQuad, toneMappingMode, debugView);
@@ -684,6 +736,7 @@ int main(int argc, char** argv)
                 scene.removeObject(objectToDelete);
             }
 
+            bool viewportResizePending = false;
             ImGui::Begin("Viewport");
             viewportHovered = ImGui::IsWindowHovered();
             ImVec2 viewportSize = ImGui::GetContentRegionAvail();
@@ -696,7 +749,7 @@ int main(int argc, char** argv)
                 viewportRenderWidth = newViewportWidth;
                 viewportRenderHeight = newViewportHeight;
                 
-                renderer.resizeSceneFramebuffer(viewportRenderWidth, viewportRenderHeight);
+                viewportResizePending = true;
             }
 
             ImVec2 imageMin = ImGui::GetCursorScreenPos();
@@ -760,6 +813,11 @@ int main(int argc, char** argv)
             ImGui::End();
 
             ImGui::Begin("Inspector");
+
+            float fps = ImGui::GetIO().Framerate;
+            ImGui::Text("FPS: %.1f", fps);
+            ImGui::Text("Frame: %.2f ms", fps > 0.0f ? 1000.0f / fps : 0.0f);
+
             if (selectedObject != nullptr)
             {
                 ImGui::TextUnformatted(selectedObject->name.c_str());
@@ -836,6 +894,9 @@ int main(int argc, char** argv)
                         Material& material = selectedObject->model->getMaterial(static_cast<std::size_t>(selectedMaterialIndex));
 
                         ImGui::ColorEdit4("Base Color", &material.baseColorFactor.x);
+                        ImGui::ColorEdit3("Emissive Factor (linear)", &material.emissiveFactor.x);
+                        ImGui::DragFloat("Emissive Strength", &material.emissiveStrength, 0.1f, 0.0f, 10000.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+                        ImGui::TextDisabled(material.emissiveMap ? "Emissive texture: loaded" : "Emissive texture: none");
                         ImGui::SliderFloat("Metallic", &material.metallicFactor, 0.0f, 1.0f);
                         ImGui::SliderFloat("Roughness", &material.roughnessFactor, 0.0f, 1.0f);
                         ImGui::Checkbox("Double Sided", &material.doubleSided);
@@ -872,6 +933,9 @@ int main(int argc, char** argv)
 
             ImGui::Render();
             ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+            if (viewportResizePending)
+                renderer.resizeSceneFramebuffer(viewportRenderWidth, viewportRenderHeight);
 
             glfwSwapBuffers(window);
             glfwPollEvents();

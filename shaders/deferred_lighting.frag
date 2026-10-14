@@ -7,6 +7,8 @@ uniform sampler2D gNormal;
 uniform sampler2D gAlbedo;
 uniform sampler2D gMaterial;
 uniform sampler2D gDepth;
+uniform sampler2D gVelocity;
+uniform sampler2D gEmission;
 uniform sampler2D ssaoMap;
 uniform sampler2DArray directionalShadowMaps;
 uniform sampler2DArray spotShadowMaps;
@@ -26,7 +28,6 @@ struct DirectionalLight
     vec3 color;
     float intensity;
 
-    mat4 lightSpaceMatrix;
     int shadowLayer;
 };
 
@@ -61,6 +62,12 @@ uniform DirectionalLight directionalLights[MAX_DIRECTIONAL_LIGHTS];
 uniform int directionalLightCount;
 
 
+#define CASCADE_COUNT 4
+uniform mat4 csmView;
+uniform float cascadeSplits[CASCADE_COUNT];
+uniform mat4 cascadeLightSpaceMatrices[MAX_DIRECTIONAL_LIGHTS * CASCADE_COUNT];
+
+
 #define MAX_POINT_LIGHTS 4
 uniform PointLight pointLights[MAX_POINT_LIGHTS];
 uniform int pointLightCount;
@@ -77,42 +84,69 @@ const float PI = 3.14159265359;
 
 float calculateDirectionalShadow(DirectionalLight light, vec3 fragPos, vec3 normal, vec3 lightDir)
 {
+    // Take derivatives before cascade selection or fragment-dependent returns.
+    vec3 positionDx = dFdx(fragPos);
+    vec3 positionDy = dFdy(fragPos);
+
     if (light.shadowLayer < 0)
         return 0.0;
 
-    vec4 fragPosLightSpace = light.lightSpaceMatrix * vec4(fragPos, 1.0);
+    float viewDepth = -(csmView * vec4(fragPos, 1.0)).z;
+    if (viewDepth > cascadeSplits[CASCADE_COUNT - 1])
+        return 0.0;
 
+    int cascade = 0;
+    for (int i = 0; i < CASCADE_COUNT - 1; ++i)
+    {
+        if (viewDepth > cascadeSplits[i])
+            ++cascade;
+    }
+
+    int layer = light.shadowLayer * CASCADE_COUNT + cascade;
+    mat4 lightMatrix = cascadeLightSpaceMatrices[layer];
+    vec4 fragPosLightSpace = lightMatrix * vec4(fragPos, 1.0);
     vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
     projCoords = projCoords * 0.5 + 0.5;
 
     if (any(lessThan(projCoords, vec3(0.0))) || any(greaterThan(projCoords, vec3(1.0))))
         return 0.0;
 
-    float currentDepth = projCoords.z;
+    // Orthographic CSM: transform the receiver's surface derivatives to UV/depth.
+    vec3 shadowDx = mat3(lightMatrix) * positionDx * 0.5;
+    vec3 shadowDy = mat3(lightMatrix) * positionDy * 0.5;
+    float determinant = shadowDx.x * shadowDy.y - shadowDx.y * shadowDy.x;
+    vec2 depthGradient = vec2(0.0);
+    if (abs(determinant) > 1e-12)
+    {
+        depthGradient = vec2(shadowDy.y * shadowDx.z - shadowDx.y * shadowDy.z, shadowDx.x * shadowDy.z - shadowDy.x * shadowDx.z) / determinant;
+    }
+
     float bias = max(0.0005 * (1.0 - dot(normal, lightDir)), 0.00005);
-
-    vec2 texelSize = 1.0 / vec2(textureSize(directionalShadowMaps, 0).xy);
-
+    vec2 mapSize = vec2(textureSize(directionalShadowMaps, 0).xy);
+    vec2 texelPosition = projCoords.xy * mapSize - 0.5;
+    vec2 baseTexel = floor(texelPosition);
+    vec2 fraction = fract(texelPosition);
     float shadow = 0.0;
 
-    for (int x = -1; x <= 1; ++x)
+    // The 16 unique taps equal a bilinearly filtered 3x3 comparison kernel.
+    for (int x = -1; x <= 2; ++x)
     {
-        for (int y = -1; y <= 1; ++y)
+        float weightX = x == -1 ? 1.0 - fraction.x : (x == 2 ? fraction.x : 1.0);
+        for (int y = -1; y <= 2; ++y)
         {
-            vec2 uv = projCoords.xy + vec2(x, y) * texelSize;
-
-            float closestDepth = texture(
-                directionalShadowMaps,
-                vec3(uv, float(light.shadowLayer))
-            ).r;
-
-            if (currentDepth - bias > closestDepth)
-                shadow += 1.0;
+            float weightY = y == -1 ? 1.0 - fraction.y : (y == 2 ? fraction.y : 1.0);
+            vec2 sampleUV = (baseTexel + vec2(x, y) + 0.5) / mapSize;
+            float closestDepth = texture(directionalShadowMaps, vec3(sampleUV, float(layer))).r;
+            float receiverDepth = projCoords.z + dot(depthGradient, sampleUV - projCoords.xy);
+            if (receiverDepth - bias > closestDepth)
+                shadow += weightX * weightY;
         }
     }
 
-    return shadow / 9.0;
+    float distanceFade = 1.0 - smoothstep(cascadeSplits[CASCADE_COUNT - 1] * 0.9, cascadeSplits[CASCADE_COUNT - 1], viewDepth);
+    return shadow / 9.0 * distanceFade;
 }
+
 
 float calculateSpotShadow(SpotLight light, vec3 fragPos, vec3 normal, vec3 lightDir)
 {
@@ -276,6 +310,22 @@ void main()
 {
     float depth = texture(gDepth, TexCoord).r;
 
+    if (debugView == 9)
+    {
+        FragColor = vec4(texture(gEmission, TexCoord).rgb, 1.0);
+        return;
+    }
+
+    if (debugView == 8)
+    {
+        vec2 velocity = texture(gVelocity, TexCoord).rg;
+
+        vec3 color = vec3(0.5 + velocity.x * 32.0, 0.5 + velocity.y * 32.0, 0.5);
+
+        FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
+        return;
+    }
+
     if(debugView == 6)
     {
         const float nearPlane = 0.1;
@@ -390,6 +440,7 @@ void main()
 
     vec3 specularIBL = prefilteredColor * (FIBL * brdf.x + brdf.y);
 
+    // Keep diffuse fill subdued while retaining more environment reflection on metal.
     vec3 ambient = (kDIBL * diffuseIBL + specularIBL) * ao * ssao;
 
     vec3 lighting = ambient;
@@ -495,5 +546,6 @@ void main()
 
     }
 
-    FragColor = vec4(lighting, 1.0);
+    vec3 emission = texture(gEmission, TexCoord).rgb;
+    FragColor = vec4(lighting + emission, 1.0);
 }

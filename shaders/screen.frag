@@ -1,10 +1,13 @@
 #version 330 core
 
 in vec2 TexCoord;
-
 out vec4 FragColor;
+
 uniform float exposure;
 uniform sampler2D screenTexture;
+uniform sampler2D bloomTexture;
+uniform float bloomIntensity;
+uniform float bloomScale;
 uniform int toneMappingMode;
 uniform int debugView;
 
@@ -23,13 +26,23 @@ void main()
 {
     vec3 hdrColor = texture(screenTexture, TexCoord).rgb;
 
+    if (debugView == 0 && bloomIntensity > 0.0)
+    {
+        hdrColor += texture(bloomTexture, TexCoord).rgb * bloomScale * bloomIntensity;
+    }
+
+    if (debugView == 10)
+    {
+        hdrColor = bloomScale > 0.0 ? texture(bloomTexture, TexCoord).rgb * bloomScale : vec3(0.0);
+    }
+
     hdrColor *= exposure;
 
-    if(debugView != 0)
+    if (debugView != 0 && debugView != 9 && debugView != 10)
     {
         vec3 displayColor = hdrColor;
 
-        if(debugView == 1)
+        if (debugView == 1)
         {
             displayColor = pow(max(hdrColor, vec3(0.0)), vec3(1.0 / 2.2));
         }
@@ -50,6 +63,5 @@ void main()
     }
 
     vec3 gammaCorrected = pow(mapped, vec3(1.0 / 2.2));
-
     FragColor = vec4(gammaCorrected, 1.0);
 }

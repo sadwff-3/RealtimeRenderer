@@ -12,12 +12,34 @@
 #include <algorithm>
 #include<random>
 #include<cmath>
+#include<cstdlib>
+#include<functional>
 
 
-Renderer::Renderer(int width, int height) :shadowShader("shaders/shadow_depth.vert", "shaders/shadow_depth.frag"), pointShadowShader("shaders/point_shadow.vert", "shaders/point_shadow.frag"), sceneShader("shaders/pbr.vert", "shaders/pbr.frag"), screenShader("shaders/screen.vert", "shaders/screen.frag"), geometryShader("shaders/gbuffer.vert", "shaders/gbuffer.frag"), ssaoShader("shaders/screen.vert", "shaders/ssao.frag"), ssaoBlurShader("shaders/screen.vert", "shaders/ssao_blur.frag"), deferredShader("shaders/screen.vert", "shaders/deferred_lighting.frag"), framebufferWidth(width), framebufferHeight(height)
+namespace
+{
+	float halton(unsigned int index, unsigned int base)
+	{
+		float result = 0.0f;
+		float fraction = 1.0f;
+
+		while (index > 0)
+		{
+			fraction /= static_cast<float>(base);
+			result += fraction * static_cast<float>(index % base);
+			index /= base;
+		}
+
+		return result;
+	}
+}
+
+
+Renderer::Renderer(int width, int height) :shadowShader("shaders/shadow_depth.vert", "shaders/shadow_depth.frag"), pointShadowShader("shaders/point_shadow.vert", "shaders/point_shadow.frag"), sceneShader("shaders/pbr.vert", "shaders/pbr.frag"), screenShader("shaders/screen.vert", "shaders/screen.frag"), geometryShader("shaders/gbuffer.vert", "shaders/gbuffer.frag"), ssaoShader("shaders/screen.vert", "shaders/ssao.frag"), ssaoBlurShader("shaders/screen.vert", "shaders/ssao_blur.frag"), deferredShader("shaders/screen.vert", "shaders/deferred_lighting.frag"), taaShader("shaders/screen.vert", "shaders/taa_resolve.frag"), bloomDownsampleShader("shaders/screen.vert", "shaders/bloom_downsample.frag"), bloomUpsampleShader("shaders/screen.vert", "shaders/bloom_upsample.frag"), framebufferWidth(width), framebufferHeight(height)
 {
 	initSceneFramebuffer();
 	initFinalFramebuffer();
+	initTAAFramebuffers();
 	initGBuffer();
 	initSSAOFramebuffer();
 	initSSAOKernel();
@@ -26,6 +48,7 @@ Renderer::Renderer(int width, int height) :shadowShader("shaders/shadow_depth.ve
 	initDirectionalShadowMaps();
 	initSpotShadowMaps();
 	initPointShadowMaps();
+	initBloomFramebuffer();
 
 	ssaoShader.use();
 	ssaoShader.setInt("gDepth", 0);
@@ -48,15 +71,69 @@ Renderer::Renderer(int width, int height) :shadowShader("shaders/shadow_depth.ve
 	deferredShader.setInt("irradianceMap", 9);
 	deferredShader.setInt("prefilterMap", 10);
 	deferredShader.setInt("brdfLUT", 11);
+	deferredShader.setInt("gVelocity", 12);
+	deferredShader.setInt("gEmission", 13);
 
+	taaShader.use();
+	taaShader.setInt("currentColor", 0);
+	taaShader.setInt("historyColor", 1);
+	taaShader.setInt("gVelocity", 2);
+	taaShader.setInt("gDepth", 3);
 	
 	screenShader.use();
 	screenShader.setInt("screenTexture", 0);
+	screenShader.setInt("bloomTexture", 1);
 	screenShader.setFloat("exposure", 1.0f);
 }
 
+
+void Renderer::beginTAAFrame(const Camera& camera)
+{
+	if (framebufferWidth <= 0 || framebufferHeight <= 0)
+		return;
+
+	if (hasPreviousTAAFrame)
+		previousViewProjection = frameProjection * frameView;
+
+	float aspectRatio = static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight);
+
+	frameView = camera.getViewMatrix();
+	frameProjection = camera.getProjectionMatrix(aspectRatio);
+
+	previousTAAJitterPixels = taaJitterPixels;
+	taaJitterPixels = glm::vec2(0.0f);
+
+	if (taaEnabled)
+	{
+		unsigned int sampleIndex = (taaFrameIndex % 8) + 1;
+
+		taaJitterPixels.x = halton(sampleIndex, 2) - 0.5f;
+		taaJitterPixels.y = halton(sampleIndex, 3) - 0.5f;
+		static const bool disableJitter = std::getenv("TAA_DISABLE_JITTER") != nullptr;
+		if (disableJitter) taaJitterPixels = glm::vec2(0.0f);
+
+		glm::mat4 jitterMatrix(1.0f);
+		jitterMatrix[3][0] = 2.0f * taaJitterPixels.x / static_cast<float>(framebufferWidth);
+		jitterMatrix[3][1] = 2.0f * taaJitterPixels.y / static_cast<float>(framebufferHeight);
+
+		frameProjection = jitterMatrix * frameProjection;
+
+		++taaFrameIndex;
+	}
+
+	if (!hasPreviousTAAFrame)
+	{
+		previousViewProjection = frameProjection * frameView;
+		previousTAAJitterPixels = taaJitterPixels;
+		hasPreviousTAAFrame = true;
+	}
+}
+
+
 Renderer::~Renderer()
 {
+	destroyBloomFramebuffer();
+
 	if (depthMap != 0)
 	{
 		glDeleteTextures(1, &depthMap);
@@ -165,7 +242,21 @@ Renderer::~Renderer()
 	{
 		glDeleteTextures(1, &gMaterialID);
 	}
+
+	if (gVelocity != 0)
+	{
+		glDeleteTextures(1, &gVelocity);
+	}
+
+	if (gEmission != 0)
+	{
+		glDeleteTextures(1, &gEmission);
+	}
+
+	glDeleteTextures(2, taaHistoryColor.data());
+	glDeleteFramebuffers(2, taaHistoryFBO.data());
 }
+
 
 void Renderer::initDirectionalShadowMaps()
 {
@@ -174,7 +265,7 @@ void Renderer::initDirectionalShadowMaps()
 
 	glBindTexture(GL_TEXTURE_2D_ARRAY, directionalShadowArray);
 
-	glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT24, DIRECTIONAL_SHADOW_SIZE, DIRECTIONAL_SHADOW_SIZE, MAX_DIRECTIONAL_SHADOWS, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+	glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT24, DIRECTIONAL_SHADOW_SIZE, DIRECTIONAL_SHADOW_SIZE, MAX_DIRECTIONAL_SHADOWS * CASCADE_COUNT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
 
 	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -363,7 +454,7 @@ void Renderer::initGBuffer()
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT4, GL_TEXTURE_2D, gMaterialID, 0);
 
-	// Depth
+	//Depth
 	glGenTextures(1, &gDepth);
 	glBindTexture(GL_TEXTURE_2D, gDepth);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, framebufferWidth, framebufferHeight, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
@@ -373,16 +464,38 @@ void Renderer::initGBuffer()
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, gDepth, 0);
 
-	unsigned int attachments[5] =
+	//Velocity
+	glGenTextures(1, &gVelocity);
+	glBindTexture(GL_TEXTURE_2D, gVelocity);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RG16F, framebufferWidth, framebufferHeight, 0, GL_RG, GL_FLOAT, nullptr);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT5, GL_TEXTURE_2D, gVelocity, 0);
+
+	//Emission
+	glGenTextures(1, &gEmission);
+	glBindTexture(GL_TEXTURE_2D, gEmission);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, framebufferWidth, framebufferHeight, 0, GL_RGB, GL_FLOAT, nullptr);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT6, GL_TEXTURE_2D, gEmission, 0);
+
+	unsigned int attachments[7] =
 	{
 		GL_COLOR_ATTACHMENT0,
 		GL_COLOR_ATTACHMENT1,
 		GL_COLOR_ATTACHMENT2,
 		GL_COLOR_ATTACHMENT3,
-		GL_COLOR_ATTACHMENT4
+		GL_COLOR_ATTACHMENT4,
+		GL_COLOR_ATTACHMENT5,
+		GL_COLOR_ATTACHMENT6
 	};
 
-	glDrawBuffers(5, attachments);
+	glDrawBuffers(7, attachments);
 
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
 	{
@@ -495,12 +608,99 @@ void Renderer::initSSAONoiseTexture()
 }
 
 
+void Renderer::initTAAFramebuffers()
+{
+	glGenFramebuffers(2, taaHistoryFBO.data());
+	glGenTextures(2, taaHistoryColor.data());
+
+	for (int i = 0; i < 2; ++i)
+	{
+		glBindTexture(GL_TEXTURE_2D, taaHistoryColor[i]);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, framebufferWidth, framebufferHeight, 0, GL_RGBA, GL_FLOAT, nullptr);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+		glBindFramebuffer(GL_FRAMEBUFFER, taaHistoryFBO[i]);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, taaHistoryColor[i], 0);
+
+		if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+			std::cerr << "TAA framebuffer " << i << " is incomplete!\n";
+	}
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+
+void Renderer::initBloomFramebuffer()
+{
+	if (framebufferWidth <= 0 || framebufferHeight <= 0)
+		return;
+
+	glGenFramebuffers(1, &bloomFBO);
+	glBindFramebuffer(GL_FRAMEBUFFER, bloomFBO);
+	glDrawBuffer(GL_COLOR_ATTACHMENT0);
+
+	int width = framebufferWidth;
+	int height = framebufferHeight;
+
+	for (int level = 0; level < 6; ++level)
+	{
+		width = std::max(1, width / 2);
+		height = std::max(1, height / 2);
+
+		BloomMip mip{ 0, width, height };
+
+		glGenTextures(1, &mip.texture);
+		glBindTexture(GL_TEXTURE_2D, mip.texture);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, width, height, 0, GL_RGB, GL_FLOAT, nullptr);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+		bloomMips.push_back(mip);
+
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, mip.texture, 0);
+
+		if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+		{
+			std::cerr << "Bloom framebuffer is incomplete!\n";
+			destroyBloomFramebuffer();
+			glBindFramebuffer(GL_FRAMEBUFFER, 0);
+			return;
+		}
+
+		if (width == 1 && height == 1)
+			break;
+	}
+
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+
 void Renderer::renderDirectionalShadowPass(const Scene& scene, const Camera& camera)
 {
+	float aspectRatio = static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight);
+
+	const float shadowFar = std::min(camera.FarPlane, DIRECTIONAL_SHADOW_DISTANCE);
+	cascadeSplits = calculateCascadeSplits(camera.NearPlane, shadowFar);
+
 	glViewport(0, 0, DIRECTIONAL_SHADOW_SIZE, DIRECTIONAL_SHADOW_SIZE);
 	glBindFramebuffer(GL_FRAMEBUFFER, directionalShadowFBO);
 
 	shadowShader.use();
+
+	const GLboolean previousPolygonOffset = glIsEnabled(GL_POLYGON_OFFSET_FILL);
+	GLfloat previousOffsetFactor = 0.0f;
+	GLfloat previousOffsetUnits = 0.0f;
+	glGetFloatv(GL_POLYGON_OFFSET_FACTOR, &previousOffsetFactor);
+	glGetFloatv(GL_POLYGON_OFFSET_UNITS, &previousOffsetUnits);
+	glEnable(GL_POLYGON_OFFSET_FILL);
+	glPolygonOffset(2.0f, 4.0f);
 
 	directionalShadowCount = 0;
 
@@ -522,47 +722,48 @@ void Renderer::renderDirectionalShadowPass(const Scene& scene, const Camera& cam
 
 		glm::vec3 direction = lightObject->transform.getForward();
 
-		glm::vec3 up(0.0f, 1.0f, 0.0f);
-
-		if (std::abs(glm::dot(direction, up)) > 0.99f)
-			up = glm::vec3(0.0f, 0.0f, 1.0f);
-
-		const glm::vec3 shadowCenter = camera.Position + camera.Front * (DIRECTIONAL_SHADOW_HALF_EXTENT * 0.5f);
-		glm::vec3 lightPos = shadowCenter - direction * (DIRECTIONAL_SHADOW_DEPTH * 0.5f);
-
-		glm::mat4 lightProjection = glm::ortho(-DIRECTIONAL_SHADOW_HALF_EXTENT, DIRECTIONAL_SHADOW_HALF_EXTENT, -DIRECTIONAL_SHADOW_HALF_EXTENT, DIRECTIONAL_SHADOW_HALF_EXTENT, 0.1f, DIRECTIONAL_SHADOW_DEPTH);
-
-		glm::mat4 lightView = glm::lookAt(lightPos, lightPos + direction, up);
-
-		glm::mat4 lightSpaceMatrix = lightProjection * lightView;
-
-		glm::vec4 shadowOrigin = lightSpaceMatrix * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
-		glm::vec2 texelOrigin = glm::vec2(shadowOrigin) * (DIRECTIONAL_SHADOW_SIZE * 0.5f);
-		glm::vec2 offset = (glm::round(texelOrigin) - texelOrigin) * (2.0f / DIRECTIONAL_SHADOW_SIZE);
-		lightSpaceMatrix[3][0] += offset.x;
-		lightSpaceMatrix[3][1] += offset.y;
-
-		directionalLightSpaceMatrices[directionalShadowCount] = lightSpaceMatrix;
-
-		glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, directionalShadowArray, 0, directionalShadowCount);
-
-		glClear(GL_DEPTH_BUFFER_BIT);
-
-		shadowShader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
-
-		for (const auto& object : scene.getObjects())
+		for (int cascade = 0; cascade < CASCADE_COUNT; ++cascade)
 		{
-			if (object->model == nullptr)
-				continue;
+			float cascadeNear = cascade == 0 ? camera.NearPlane : cascadeSplits[cascade - 1];
+			float cascadeFar = cascadeSplits[cascade];
+			
+			glm::mat4 lightSpaceMatrix = calculateCascadeLightMatrix(direction, camera, aspectRatio, cascadeNear, cascadeFar);
+			
+			glm::vec4 shadowOrigin = lightSpaceMatrix * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+			glm::vec2 texelOrigin = glm::vec2(shadowOrigin) * (DIRECTIONAL_SHADOW_SIZE * 0.5f);
+			glm::vec2 offset = (glm::round(texelOrigin) - texelOrigin) * (2.0f / DIRECTIONAL_SHADOW_SIZE);
+			lightSpaceMatrix[3][0] += offset.x;
+			lightSpaceMatrix[3][1] += offset.y;
 
-			glm::mat4 model = object->transform.getMatrix();
+			int layer = directionalShadowCount * CASCADE_COUNT + cascade;
+			directionalCascadeMatrices[layer] = lightSpaceMatrix;
 
-			shadowShader.setMat4("model", model);
-			object->model->drawShadow(shadowShader);
+			glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, directionalShadowArray, 0, layer);
+
+			glClear(GL_DEPTH_BUFFER_BIT);
+
+			shadowShader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
+
+			for (const auto& object : scene.getObjects())
+			{
+				if (object->model == nullptr)
+					continue;
+
+				glm::mat4 model = object->transform.getMatrix();
+				glm::mat4 localToShadowClip = lightSpaceMatrix * model;
+				float clipMargin = 4.0f / static_cast<float>(DIRECTIONAL_SHADOW_SIZE);
+
+				shadowShader.setMat4("model", model);
+				object->model->drawShadowCulled(shadowShader, localToShadowClip, clipMargin);
+			}
 		}
 
 		++directionalShadowCount;
 	}
+
+	glPolygonOffset(previousOffsetFactor, previousOffsetUnits);
+	if (!previousPolygonOffset)
+		glDisable(GL_POLYGON_OFFSET_FILL);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glViewport(0, 0, framebufferWidth, framebufferHeight);
@@ -637,6 +838,9 @@ void Renderer::renderSpotShadowPass(const Scene& scene)
 void Renderer::renderPointShadowPass(const Scene& scene)
 {
 	pointShadowCount = 0;
+	const int shadowBudget = std::clamp(pointShadowBudget, 0, MAX_POINT_SHADOWS);
+	if (shadowBudget == 0) return;
+	int activePointCount = 0;
 
 	glViewport(0, 0, POINT_SHADOW_SIZE, POINT_SHADOW_SIZE);
 	glBindFramebuffer(GL_FRAMEBUFFER, pointShadowFBO);
@@ -650,13 +854,15 @@ void Renderer::renderPointShadowPass(const Scene& scene)
 
 		const Light& light = object->light.value();
 
-		if (light.type != LightType::Point)
+		if (light.type != LightType::Point || light.intensity <= 0.0f)
 			continue;
+
+		if (++activePointCount > 4) break;
 
 		if (!light.castShadow)
 			continue;
 
-		if (pointShadowCount >= MAX_POINT_SHADOWS)
+		if (pointShadowCount >= shadowBudget)
 			break;
 
 		glm::vec3 lightPos = object->transform.position;
@@ -697,7 +903,7 @@ void Renderer::renderPointShadowPass(const Scene& scene)
 				glm::mat4 model = object->transform.getMatrix();
 
 				pointShadowShader.setMat4("model", model);
-				object->model->drawShadow(pointShadowShader);
+				object->model->drawShadowCulled(pointShadowShader, lightSpaceMatrix * model, 4.0f / static_cast<float>(POINT_SHADOW_SIZE));
 			}
 		}
 
@@ -726,16 +932,64 @@ void Renderer::renderGeometryPass(const Scene& scene, Camera& camera)
 	glClearBufferfv(GL_COLOR, 2, clearColor);
 	glClearBufferuiv(GL_COLOR, 3, clearObjectID);
 	glClearBufferuiv(GL_COLOR, 4, clearMaterialID);
+	const float clearVelocity[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	glClearBufferfv(GL_COLOR, 5, clearVelocity);
+	glClearBufferfv(GL_COLOR, 6, clearColor);
 
 	geometryShader.use();
 
-	glm::mat4 view = camera.getViewMatrix();
-	glm::mat4 projection = camera.getProjectionMatrix(static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight));
+	glm::mat4 view = frameView;
+	glm::mat4 projection = frameProjection;
 
 	geometryShader.setMat4("view", view);
 	geometryShader.setMat4("projection", projection);
 
 	const auto& objects = scene.getObjects();
+
+	std::unordered_map<const SceneObject*, glm::mat4> currentModelMatrices;
+	currentModelMatrices.reserve(objects.size());
+
+	// Only bypass rejection when every tracked image-producing scene input is unchanged.
+	std::size_t signature = 0;
+	std::size_t appearance = 0;
+	auto add = [&](auto value) { signature ^= std::hash<decltype(value)>{}(value) + 0x9e3779b9 + (signature << 6) + (signature >> 2); };
+	auto addAppearance = [&](auto value) { add(value); appearance ^= std::hash<decltype(value)>{}(value) + 0x9e3779b9 + (appearance << 6) + (appearance >> 2); };
+	auto addMatrix = [&](const glm::mat4& matrix) { for (int c = 0; c < 4; ++c) for (int r = 0; r < 4; ++r) add(matrix[c][r]); };
+	addAppearance(std::clamp(pointShadowBudget, 0, MAX_POINT_SHADOWS));
+	addMatrix(camera.getProjectionMatrix(static_cast<float>(framebufferWidth) / framebufferHeight) * frameView);
+	for (const auto& object : objects)
+	{
+		addAppearance(object.get());
+		addAppearance(object->model);
+		addMatrix(object->transform.getMatrix());
+		if (object->light)
+		{
+			const auto& light = *object->light;
+			glm::mat4 lightTransform = object->transform.getMatrix();
+			for (int c = 0; c < 4; ++c) for (int r = 0; r < 4; ++r) addAppearance(lightTransform[c][r]);
+			addAppearance(static_cast<int>(light.type));
+			for (int c = 0; c < 3; ++c) addAppearance(light.color[c]);
+			addAppearance(light.intensity); addAppearance(light.range); addAppearance(light.innerAngle); addAppearance(light.outerAngle); addAppearance(light.castShadow);
+		}
+		if (!object->model) continue;
+		for (std::size_t i = 0; i < object->model->getMaterialCount(); ++i)
+		{
+			const auto& material = object->model->getMaterial(i);
+			addAppearance(material.albedo); addAppearance(material.normalMap); addAppearance(material.metallicMap); addAppearance(material.roughnessMap); addAppearance(material.aoMap);
+			addAppearance(material.emissiveMap);
+			addAppearance(material.emissiveStrength);
+			for (int c = 0; c < 3; ++c)
+				addAppearance(material.emissiveFactor[c]);
+			for (int c = 0; c < 4; ++c) addAppearance(material.baseColorFactor[c]);
+			addAppearance(material.metallicFactor); addAppearance(material.roughnessFactor); addAppearance(material.normalYSign); addAppearance(material.alphaMode); addAppearance(material.alphaCutoff); addAppearance(material.doubleSided);
+		}
+	}
+	bool sceneUnchanged = hasTAASceneSignature && signature == taaSceneSignature;
+	taaStableFrames = sceneUnchanged && taaHistoryValid ? std::min(taaStableFrames + 1, 4095) : 0;
+	if (hasTAASceneSignature && appearance != taaAppearanceSignature) taaHistoryValid = false;
+	taaSceneSignature = signature;
+	taaAppearanceSignature = appearance;
+	hasTAASceneSignature = true;
 
 	for (size_t i = 0; i < objects.size(); ++i)
 	{
@@ -748,10 +1002,29 @@ void Renderer::renderGeometryPass(const Scene& scene, Camera& camera)
 
 		glm::mat4 model = object->transform.getMatrix();
 
+		const SceneObject* key = object.get();
+		auto it = previousModelMatrices.find(key);
+		bool existedLastFrame = it != previousModelMatrices.end();
+
+		glm::mat4 previousModel = existedLastFrame ? it->second : model;
+		glm::mat4 previousVP = existedLastFrame ? previousViewProjection : frameProjection * frameView;
+
 		geometryShader.setMat4("model", model);
+		geometryShader.setMat4("previousModel", previousModel);
+		geometryShader.setMat4("previousViewProjection", previousVP);
 		geometryShader.setInt("objectID", static_cast<int>(i + 1));
+
 		object->model->draw(geometryShader);
+		
+		currentModelMatrices.emplace(key, model);
 	}
+
+	bool sceneMembershipChanged = currentModelMatrices.size() != previousModelMatrices.size();
+	for (const auto& entry : currentModelMatrices)
+		sceneMembershipChanged = sceneMembershipChanged || previousModelMatrices.find(entry.first) == previousModelMatrices.end();
+	if (sceneMembershipChanged)
+		taaHistoryValid = false;
+	previousModelMatrices.swap(currentModelMatrices);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
@@ -777,8 +1050,8 @@ void Renderer::renderSSAOPass(Mesh& quad, Camera& camera)
 	glActiveTexture(GL_TEXTURE2);
 	glBindTexture(GL_TEXTURE_2D, ssaoNoiseTexture);
 
-	glm::mat4 view = camera.getViewMatrix();
-	glm::mat4 projection = camera.getProjectionMatrix(static_cast<float>(framebufferWidth) / framebufferHeight);
+	glm::mat4 view = frameView;
+	glm::mat4 projection = frameProjection;
 
 	ssaoShader.setMat4("view", view);
 	ssaoShader.setMat4("projection", projection);
@@ -863,14 +1136,31 @@ void Renderer::renderDeferredLightingPass(Mesh& quad, Camera& camera, const Scen
 	glActiveTexture(GL_TEXTURE11);
 	glBindTexture(GL_TEXTURE_2D, brdfLUT);
 
+	glActiveTexture(GL_TEXTURE12);
+	glBindTexture(GL_TEXTURE_2D, gVelocity);
 
-	glm::mat4 view = camera.getViewMatrix();
-	glm::mat4 projection = camera.getProjectionMatrix(static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight));
+	glActiveTexture(GL_TEXTURE13);
+	glBindTexture(GL_TEXTURE_2D, gEmission);
+
+
+	glm::mat4 view = frameView;
+	glm::mat4 projection = frameProjection;
 
 	glm::mat4 inverseViewProjection = glm::inverse(projection * view);
 
 	deferredShader.setMat4("inverseViewProjection", inverseViewProjection);
 	deferredShader.setVec3("viewPos", camera.Position);
+	deferredShader.setMat4("csmView", view);
+
+	for (int i = 0; i < CASCADE_COUNT; ++i)
+	{
+		deferredShader.setFloat("cascadeSplits[" + std::to_string(i) + "]", cascadeSplits[i]);
+	}
+
+	for (int i = 0; i < MAX_DIRECTIONAL_SHADOWS * CASCADE_COUNT; ++i)
+	{
+		deferredShader.setMat4("cascadeLightSpaceMatrices[" + std::to_string(i) + "]", directionalCascadeMatrices[i]);
+	}
 
 	
 	deferredShader.setInt("debugView", debugView);
@@ -905,8 +1195,6 @@ void Renderer::renderDeferredLightingPass(Mesh& quad, Camera& camera, const Scen
 		{
 			shadowLayer = directionalShadowIndex;
 
-			deferredShader.setMat4(base + ".lightSpaceMatrix", directionalLightSpaceMatrices[directionalShadowIndex]);
-
 			++directionalShadowIndex;
 		}
 
@@ -927,7 +1215,7 @@ void Renderer::renderDeferredLightingPass(Mesh& quad, Camera& camera, const Scen
 
 		const Light& light = object->light.value();
 
-		if (light.type != LightType::Point)
+		if (light.type != LightType::Point || light.intensity <= 0.0f)
 			continue;
 
 		if (count >= 4)
@@ -1013,6 +1301,162 @@ void Renderer::renderDeferredLightingPass(Mesh& quad, Camera& camera, const Scen
 }
 
 
+void Renderer::renderTAAPass(Mesh& quad, int debugView)
+{
+	if (!taaEnabled || debugView != 0)
+	{
+		taaHistoryValid = false;
+		return;
+	}
+
+	int writeIndex = 1 - taaHistoryReadIndex;
+
+	glBindFramebuffer(GL_FRAMEBUFFER, taaHistoryFBO[writeIndex]);
+	glViewport(0, 0, framebufferWidth, framebufferHeight);
+	glDisable(GL_DEPTH_TEST);
+
+	taaShader.use();
+	taaShader.setInt("historyValid", taaHistoryValid ? 1 : 0);
+	taaShader.setInt("stableFrames", taaStableFrames);
+	taaShader.setFloat("currentJitterX", taaJitterPixels.x / static_cast<float>(framebufferWidth));
+	taaShader.setFloat("currentJitterY", taaJitterPixels.y / static_cast<float>(framebufferHeight));
+	taaShader.setFloat("previousJitterX", previousTAAJitterPixels.x / static_cast<float>(framebufferWidth));
+	taaShader.setFloat("previousJitterY", previousTAAJitterPixels.y / static_cast<float>(framebufferHeight));
+	taaShader.setMat4("inverseCurrentViewProjection", glm::inverse(frameProjection * frameView));
+	taaShader.setMat4("previousViewProjection", previousViewProjection);
+	taaShader.setVec3("currentCameraPosition", glm::vec3(glm::inverse(frameView)[3]));
+
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, sceneColorTexture);
+
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D, taaHistoryColor[taaHistoryReadIndex]);
+
+	glActiveTexture(GL_TEXTURE2);
+	glBindTexture(GL_TEXTURE_2D, gVelocity);
+
+	glActiveTexture(GL_TEXTURE3);
+	glBindTexture(GL_TEXTURE_2D, gDepth);
+
+	static const bool diagnostics = std::getenv("TAA_DIAGNOSTICS") != nullptr;
+	if (diagnostics && taaFrameIndex <= 16)
+	{
+		float velocity[2] = {};
+		glGetTextureSubImage(gVelocity, 0, framebufferWidth / 2, framebufferHeight / 2, 0, 1, 1, 1, GL_RG, GL_FLOAT, sizeof(velocity), velocity);
+		float depth = 1.0f;
+		glGetTextureSubImage(gDepth, 0, framebufferWidth / 2, framebufferHeight / 2, 0, 1, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, sizeof(depth), &depth);
+		glm::vec2 size(framebufferWidth, framebufferHeight);
+		glm::vec2 uv = (glm::vec2(framebufferWidth / 2, framebufferHeight / 2) + 0.5f) / size;
+		glm::vec2 previousUV = uv + (taaJitterPixels - previousTAAJitterPixels) / size - glm::vec2(velocity[0], velocity[1]);
+		if (depth >= 1.0f)
+		{
+			glm::vec4 world = glm::inverse(frameProjection * frameView) * glm::vec4((uv + taaJitterPixels / size) * 2.0f - 1.0f, 1.0f, 1.0f);
+			glm::vec4 previousDirection = previousViewProjection * glm::vec4(glm::vec3(world) / world.w - glm::vec3(glm::inverse(frameView)[3]), 0.0f);
+			if (previousDirection.w > 0.0f) previousUV = glm::vec2(previousDirection) / previousDirection.w * 0.5f + 0.5f - previousTAAJitterPixels / size;
+		}
+		std::cout << "TAA sample=" << ((taaFrameIndex - 1) % 8 + 1) << " size=" << framebufferWidth << 'x' << framebufferHeight << " jitterPx=" << taaJitterPixels.x << ',' << taaJitterPixels.y << " previousJitterPx=" << previousTAAJitterPixels.x << ',' << previousTAAJitterPixels.y << " velocityPx=" << velocity[0] * framebufferWidth << ',' << velocity[1] * framebufferHeight << " previousUV=" << previousUV.x << ',' << previousUV.y << " stableFrames=" << taaStableFrames << " historyValid=" << taaHistoryValid << " read=" << taaHistoryReadIndex << " write=" << writeIndex << '\n';
+	}
+
+	quad.draw();
+
+	taaHistoryReadIndex = writeIndex;
+	taaHistoryValid = true;
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glEnable(GL_DEPTH_TEST);
+}
+
+
+void Renderer::renderBloomPass(Mesh& quad, int debugView)
+{
+	bloomReady = false;
+
+	if ((!bloom.enabled && debugView != 10) || (debugView != 0 && debugView != 10) || bloomMips.empty())
+		return;
+
+	const GLboolean depthEnabled = glIsEnabled(GL_DEPTH_TEST);
+	const GLboolean blendEnabled = glIsEnabled(GL_BLEND);
+
+	GLint drawFBO, readFBO;
+	GLint viewport[4];
+	GLint srcRGB, dstRGB, srcAlpha, dstAlpha;
+	GLint eqRGB, eqAlpha;
+
+	glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawFBO);
+	glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &readFBO);
+	glGetIntegerv(GL_VIEWPORT, viewport);
+	glGetIntegerv(GL_BLEND_SRC_RGB, &srcRGB);
+	glGetIntegerv(GL_BLEND_DST_RGB, &dstRGB);
+	glGetIntegerv(GL_BLEND_SRC_ALPHA, &srcAlpha);
+	glGetIntegerv(GL_BLEND_DST_ALPHA, &dstAlpha);
+	glGetIntegerv(GL_BLEND_EQUATION_RGB, &eqRGB);
+	glGetIntegerv(GL_BLEND_EQUATION_ALPHA, &eqAlpha);
+
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_BLEND);
+	glBindFramebuffer(GL_FRAMEBUFFER, bloomFBO);
+	glActiveTexture(GL_TEXTURE0);
+
+	unsigned int source = getPostTAAColorTexture(debugView);
+
+	bloomDownsampleShader.use();
+	bloomDownsampleShader.setInt("sourceTexture", 0);
+	bloomDownsampleShader.setFloat("threshold", std::max(bloom.threshold, 0.0f));
+	bloomDownsampleShader.setFloat("softKnee", std::clamp(bloom.softKnee, 0.0f, 1.0f));
+
+	for (std::size_t i = 0; i < bloomMips.size(); ++i)
+	{
+		const auto& mip = bloomMips[i];
+
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, mip.texture, 0);
+		glViewport(0, 0, mip.width, mip.height);
+		glBindTexture(GL_TEXTURE_2D, source);
+
+		bloomDownsampleShader.setInt("firstPass", i == 0 ? 1 : 0);
+		quad.draw();
+
+		source = mip.texture;
+	}
+
+	bloomUpsampleShader.use();
+	bloomUpsampleShader.setInt("sourceTexture", 0);
+
+	glEnable(GL_BLEND);
+	glBlendEquation(GL_FUNC_ADD);
+	glBlendFunc(GL_ONE, GL_ONE);
+
+	for (int i = static_cast<int>(bloomMips.size()) - 1; i > 0; --i)
+	{
+		const auto& target = bloomMips[i - 1];
+
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, target.texture, 0);
+		glViewport(0, 0, target.width, target.height);
+		glBindTexture(GL_TEXTURE_2D, bloomMips[i].texture);
+
+		quad.draw();
+	}
+
+	bloomReady = true;
+
+	glBlendFuncSeparate(srcRGB, dstRGB, srcAlpha, dstAlpha);
+	glBlendEquationSeparate(eqRGB, eqAlpha);
+
+	if (blendEnabled)
+		glEnable(GL_BLEND);
+	else
+		glDisable(GL_BLEND);
+
+	if (depthEnabled)
+		glEnable(GL_DEPTH_TEST);
+	else
+		glDisable(GL_DEPTH_TEST);
+
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, drawFBO);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, readFBO);
+	glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+}
+
+
 void Renderer::renderScenePass(const Scene& scene, Camera& camera, const DirectionalLight& directionalLight, const PointLight* pointLights, int pointLightCount, const glm::mat4& lightSpaceMatrix)
 {
 	beginScenePass();
@@ -1064,9 +1508,15 @@ void Renderer::renderScreenPass(Mesh& quad, int toneMappingMode, int debugView)
 	screenShader.use();
 	screenShader.setInt("debugView", debugView);
 	screenShader.setInt("toneMappingMode", toneMappingMode);
+	screenShader.setFloat("bloomIntensity", bloomReady && bloom.enabled ? std::max(bloom.intensity, 0.0f) : 0.0f);
+	screenShader.setFloat("bloomScale", bloomReady ? 1.0f / static_cast<float>(bloomMips.size()) : 0.0f);
 
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D, bloomReady ? bloomMips.front().texture : 0);
+
+	unsigned int outputTexture = taaEnabled && taaHistoryValid && debugView == 0 ? taaHistoryColor[taaHistoryReadIndex] : sceneColorTexture;
 	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, sceneColorTexture);
+	glBindTexture(GL_TEXTURE_2D, outputTexture);
 
 	quad.draw();
 
@@ -1084,8 +1534,16 @@ unsigned int Renderer::getShadowMap() const
 
 void Renderer::resizeSceneFramebuffer(int width, int height)
 {
+	if (width <= 0 || height <= 0)
+		return;
+	if (width == framebufferWidth && height == framebufferHeight)
+		return;
+
 	framebufferWidth = width;
 	framebufferHeight = height;
+
+	destroyBloomFramebuffer();
+	initBloomFramebuffer();
 
 	glBindTexture(GL_TEXTURE_2D, sceneColorTexture);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, framebufferWidth, framebufferHeight, 0, GL_RGB, GL_FLOAT, nullptr);
@@ -1114,6 +1572,14 @@ void Renderer::resizeSceneFramebuffer(int width, int height)
 	glBindTexture(GL_TEXTURE_2D, gDepth);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, framebufferWidth, framebufferHeight, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
 
+	glBindTexture(GL_TEXTURE_2D, gVelocity);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RG16F, framebufferWidth, framebufferHeight, 0, GL_RG, GL_FLOAT, nullptr);
+	hasPreviousTAAFrame = false;
+	previousModelMatrices.clear();
+
+	glBindTexture(GL_TEXTURE_2D, gEmission);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, framebufferWidth, framebufferHeight, 0, GL_RGB, GL_FLOAT, nullptr);
+
 	glBindTexture(GL_TEXTURE_2D, ssaoTexture);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, framebufferWidth, framebufferHeight, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
 
@@ -1122,6 +1588,17 @@ void Renderer::resizeSceneFramebuffer(int width, int height)
 
 	glBindTexture(GL_TEXTURE_2D, finalColorTexture);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, framebufferWidth, framebufferHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+
+	for (int i = 0; i < 2; ++i)
+	{
+		glBindTexture(GL_TEXTURE_2D, taaHistoryColor[i]);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, framebufferWidth, framebufferHeight, 0, GL_RGBA, GL_FLOAT, nullptr);
+	}
+
+	taaHistoryReadIndex = 0;
+	taaHistoryValid = false;
+	hasPreviousTAAFrame = false;
+	previousModelMatrices.clear();
 }
 
 
@@ -1184,4 +1661,140 @@ unsigned int Renderer::readMaterialID(int x, int y) const
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, previousReadFramebuffer);
 
 	return materialID;
+}
+
+
+std::array<float,Renderer::CASCADE_COUNT> Renderer::calculateCascadeSplits(float nearPlane, float farPlane) const
+{
+	std::array<float, CASCADE_COUNT> splits{};
+
+	const float lambda = 0.9f;
+
+	for (int i = 0; i < CASCADE_COUNT; ++i)
+	{
+		float p = static_cast<float>(i + 1) / static_cast<float>(CASCADE_COUNT);
+
+		float log = nearPlane * std::pow(farPlane / nearPlane, p);
+		float uniform = nearPlane + (farPlane - nearPlane) * p;
+
+		splits[i] = lambda * log + (1.0f - lambda) * uniform;
+	}
+
+	return splits;
+}
+
+
+std::vector<glm::vec4> Renderer::getFrustumCornersWorldSpace(const Camera& camera, float aspectRatio, float nearPlane, float farPlane) const
+{
+	float tanHalfFov = tan(glm::radians(camera.Zoom * 0.5f));
+
+	float nearHeight = nearPlane * tanHalfFov;
+	float nearWidth = nearHeight * aspectRatio;
+
+	float farHeight = farPlane * tanHalfFov;
+	float farWidth = farHeight * aspectRatio;
+
+	glm::vec3 nearCenter = camera.Position + camera.Front * nearPlane;
+	glm::vec3 farCenter = camera.Position + camera.Front * farPlane;
+
+	glm::vec3 nearTopLeft = nearCenter + camera.Up * nearHeight - camera.Right * nearWidth;
+	glm::vec3 nearTopRight = nearCenter + camera.Up * nearHeight + camera.Right * nearWidth;
+	glm::vec3 nearBottomLeft = nearCenter - camera.Up * nearHeight - camera.Right * nearWidth;
+	glm::vec3 nearBottomRight = nearCenter - camera.Up * nearHeight + camera.Right * nearWidth;
+	glm::vec3 farTopLeft = farCenter + camera.Up * farHeight - camera.Right * farWidth;
+	glm::vec3 farTopRight = farCenter + camera.Up * farHeight + camera.Right * farWidth;
+	glm::vec3 farBottomLeft = farCenter - camera.Up * farHeight - camera.Right * farWidth;
+	glm::vec3 farBottomRight = farCenter - camera.Up * farHeight + camera.Right * farWidth;
+
+	return
+	{ glm::vec4(nearBottomLeft, 1.0f), glm::vec4(nearBottomRight, 1.0f), glm::vec4(nearTopRight, 1.0f), glm::vec4(nearTopLeft, 1.0f), glm::vec4(farBottomLeft, 1.0f), glm::vec4(farBottomRight, 1.0f), glm::vec4(farTopRight, 1.0f), glm::vec4(farTopLeft, 1.0f) };
+}
+
+
+glm::mat4 Renderer::calculateCascadeLightMatrix(const glm::vec3& lightDirection, const Camera& camera, float aspectRatio, float nearPlane, float farPlane) const
+{
+	auto corners = getFrustumCornersWorldSpace(camera, aspectRatio, nearPlane, farPlane);
+
+	glm::vec3 center(0.0f);
+
+	for (const auto& corner : corners)
+	{
+		center += glm::vec3(corner);
+	}
+
+	center /= static_cast<float>(corners.size());
+
+	glm::vec3 up(0.0f, 1.0f, 0.0f);
+
+	if (std::abs(glm::dot(lightDirection, up)) > 0.99f)
+		up = glm::vec3(0.0f, 0.0f, 1.0f);
+
+	float distance = 100.0f;
+
+	glm::vec3 lightPos = center - lightDirection * distance;
+
+	glm::mat4 lightView = glm::lookAt(lightPos, center, up);
+
+	// A bounding sphere keeps the XY scale fixed when the camera rotates.
+	const float halfDepth = (farPlane - nearPlane) * 0.5f;
+	const float farHeight = farPlane * std::tan(glm::radians(camera.Zoom * 0.5f));
+	const float farWidth = farHeight * aspectRatio;
+	float radius = std::sqrt(farWidth * farWidth + farHeight * farHeight + halfDepth * halfDepth);
+	// Leave room for the existing half-texel snapping and the 3x3 PCF kernel.
+	radius *= static_cast<float>(DIRECTIONAL_SHADOW_SIZE) / static_cast<float>(DIRECTIONAL_SHADOW_SIZE - 4);
+
+	float minZ = FLT_MAX;
+	float maxZ = -FLT_MAX;
+
+	for (const auto& corner : corners)
+	{
+		glm::vec4 lightSpace = lightView * corner;
+
+		minZ = std::min(minZ, lightSpace.z);
+		maxZ = std::max(maxZ, lightSpace.z);
+	}
+
+	float zPadding = 50.0f;
+
+	minZ -= zPadding;
+	maxZ += zPadding;
+
+	glm::mat4 lightProjection = glm::ortho(-radius, radius, -radius, radius, -maxZ, -minZ);
+
+	return lightProjection * lightView;
+}
+
+
+void Renderer::setTAAEnabled(bool enabled)
+{
+	if (taaEnabled == enabled)
+		return;
+
+	taaEnabled = enabled;
+	taaFrameIndex = 0;
+	taaHistoryReadIndex = 0;
+	taaHistoryValid = false;
+	hasPreviousTAAFrame = false;
+	previousModelMatrices.clear();
+}
+
+
+void Renderer::destroyBloomFramebuffer()
+{
+	for (const auto& mip : bloomMips)
+	{
+		glDeleteTextures(1, &mip.texture);
+	}
+
+	bloomMips.clear();
+
+	glDeleteFramebuffers(1, &bloomFBO);
+	bloomFBO = 0;
+	bloomReady = false;
+}
+
+
+unsigned int Renderer::getPostTAAColorTexture(int debugView) const
+{
+	return taaEnabled && taaHistoryValid && (debugView == 0 || debugView == 10) ? taaHistoryColor[taaHistoryReadIndex] : sceneColorTexture;
 }
