@@ -117,7 +117,7 @@ void scroll_callback(GLFWwindow* window,double xoffset,double yoffset)
 }
 
 
-std::string openModelFileDialog()
+std::string openFileDialog(const char* filter, const char* title)
 {
 #ifdef _WIN32
 
@@ -129,7 +129,8 @@ std::string openModelFileDialog()
     dialog.lpstrFile = filePath;
     dialog.nMaxFile = MAX_PATH;
 
-    dialog.lpstrFilter = "glTF Models (*.gltf;*.glb)\0" "*.gltf;*.glb\0" "All Files (*.*)\0" "*.*\0";
+    dialog.lpstrFilter = filter;
+    dialog.lpstrTitle = title;
 
     dialog.nFilterIndex = 1;
 
@@ -189,6 +190,78 @@ void focusSelectedObject(Camera& camera, SceneObject* object, float aspectRatio)
 }
 
 
+void applyEditorStyle()
+{
+    ImGui::StyleColorsDark();
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.FontSizeBase = 17.0f;
+    style.WindowPadding = ImVec2(16.0f, 14.0f);
+    style.FramePadding = ImVec2(9.0f, 6.0f);
+    style.ItemSpacing = ImVec2(10.0f, 9.0f);
+    style.ItemInnerSpacing = ImVec2(8.0f, 6.0f);
+    style.WindowMinSize = ImVec2(180.0f, 120.0f);
+    style.WindowRounding = 5.0f;
+    style.ChildRounding = 5.0f;
+    style.FrameRounding = 4.0f;
+    style.PopupRounding = 6.0f;
+    style.ScrollbarRounding = 6.0f;
+    style.GrabRounding = 4.0f;
+    style.TabRounding = 4.0f;
+    style.WindowBorderSize = 1.0f;
+    style.ScrollbarSize = 12.0f;
+    style.WindowMenuButtonPosition = ImGuiDir_None;
+
+    ImVec4* colors = style.Colors;
+    colors[ImGuiCol_Text] = ImVec4(0.88f, 0.90f, 0.93f, 1.0f);
+    colors[ImGuiCol_TextDisabled] = ImVec4(0.48f, 0.53f, 0.60f, 1.0f);
+    colors[ImGuiCol_WindowBg] = ImVec4(0.095f, 0.105f, 0.125f, 1.0f);
+    colors[ImGuiCol_ChildBg] = colors[ImGuiCol_WindowBg];
+    colors[ImGuiCol_PopupBg] = ImVec4(0.12f, 0.135f, 0.16f, 1.0f);
+    colors[ImGuiCol_Border] = ImVec4(0.20f, 0.23f, 0.28f, 1.0f);
+    colors[ImGuiCol_FrameBg] = ImVec4(0.16f, 0.18f, 0.215f, 1.0f);
+    colors[ImGuiCol_FrameBgHovered] = ImVec4(0.21f, 0.25f, 0.30f, 1.0f);
+    colors[ImGuiCol_FrameBgActive] = ImVec4(0.24f, 0.29f, 0.35f, 1.0f);
+    colors[ImGuiCol_TitleBg] = ImVec4(0.11f, 0.125f, 0.15f, 1.0f);
+    colors[ImGuiCol_TitleBgActive] = ImVec4(0.15f, 0.175f, 0.21f, 1.0f);
+    colors[ImGuiCol_MenuBarBg] = colors[ImGuiCol_PopupBg];
+    colors[ImGuiCol_Header] = ImVec4(0.17f, 0.20f, 0.24f, 1.0f);
+    colors[ImGuiCol_HeaderHovered] = ImVec4(0.22f, 0.28f, 0.33f, 1.0f);
+    colors[ImGuiCol_HeaderActive] = ImVec4(0.22f, 0.35f, 0.39f, 1.0f);
+    colors[ImGuiCol_Button] = ImVec4(0.19f, 0.23f, 0.28f, 1.0f);
+    colors[ImGuiCol_ButtonHovered] = ImVec4(0.25f, 0.32f, 0.38f, 1.0f);
+    colors[ImGuiCol_ButtonActive] = ImVec4(0.24f, 0.39f, 0.43f, 1.0f);
+    colors[ImGuiCol_CheckMark] = ImVec4(0.35f, 0.75f, 0.73f, 1.0f);
+    colors[ImGuiCol_SliderGrab] = ImVec4(0.32f, 0.65f, 0.65f, 1.0f);
+    colors[ImGuiCol_SliderGrabActive] = ImVec4(0.43f, 0.82f, 0.79f, 1.0f);
+    colors[ImGuiCol_Tab] = ImVec4(0.12f, 0.14f, 0.17f, 1.0f);
+    colors[ImGuiCol_TabSelected] = ImVec4(0.19f, 0.23f, 0.28f, 1.0f);
+    colors[ImGuiCol_TabHovered] = ImVec4(0.24f, 0.32f, 0.37f, 1.0f);
+    colors[ImGuiCol_TabDimmed] = colors[ImGuiCol_TitleBg];
+    colors[ImGuiCol_TabDimmedSelected] = ImVec4(0.16f, 0.19f, 0.23f, 1.0f);
+    colors[ImGuiCol_Separator] = colors[ImGuiCol_Border];
+    colors[ImGuiCol_DockingPreview] = ImVec4(0.35f, 0.75f, 0.73f, 0.3f);
+    colors[ImGuiCol_TextSelectedBg] = ImVec4(0.25f, 0.55f, 0.56f, 0.4f);
+}
+
+bool beginInspectorProperties(const char* id)
+{
+    if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingStretchProp))
+        return false;
+    ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthFixed, 96.0f);
+    ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
+    return true;
+}
+
+void inspectorProperty(const char* label)
+{
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(label);
+    ImGui::TableSetColumnIndex(1);
+    ImGui::SetNextItemWidth(-1.0f);
+}
+
 int main(int argc, char** argv)
 {
     if (!glfwInit())
@@ -242,7 +315,12 @@ int main(int argc, char** argv)
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
-    ImGui::StyleColorsDark();
+    applyEditorStyle();
+    const char* editorFontPath = "C:/Windows/Fonts/segoeui.ttf";
+    if (std::filesystem::exists(editorFontPath))
+        io.Fonts->AddFontFromFileTTF(editorFontPath, 17.0f);
+    else
+        io.Fonts->AddFontDefault();
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 450");
     
@@ -260,29 +338,9 @@ int main(int argc, char** argv)
 
         Renderer renderer(framebufferWidth, framebufferHeight);
         EnvironmentMap environmentMap;
-        Texture testHDR("assets/neoncity/symmetrical_garden_4k.hdr");
-
-        if (testHDR.valid())
-        {
-            environmentMap.generate(testHDR);
-            environmentMap.generateIrradiance();
-            environmentMap.generatePrefilter();
-            environmentMap.generateBRDFLUT();
-        }
-
-        Model* apartment = assets.loadModel("assets/neoncity/medieval_tavern_kit.glb", true);
-
-        if (apartment)
-        {
-            // Scene-specific night exposure for signs; keep the imported glTF factors intact.
-            for (std::size_t i = 0; i < apartment->getMaterialCount(); ++i)
-                apartment->getMaterial(i).emissiveStrength *= 0.65f;
-            scene.addObject("Apartment", apartment);
-        }
-        else
-        {
-            std::cerr << "Failed to load Apartment\n";
-        }
+        std::string environmentName;
+        std::string hdrImportError;
+        bool showHDRImportError = false;
 
         //debug
         std::vector<Vertex> debugQuadVertices =
@@ -310,6 +368,7 @@ int main(int argc, char** argv)
         float lastFrame = 0.0f;
         int toneMappingMode = 1;
         int debugView = 0;
+        bool viewportFullscreen = false;
 
         int viewportRenderWidth = framebufferWidth;
         int viewportRenderHeight = framebufferHeight;
@@ -318,34 +377,12 @@ int main(int argc, char** argv)
         
         Light directionalLight;
         directionalLight.type = LightType::Directional;
-        directionalLight.color = glm::vec3(0.55f, 0.65f, 1.0f);
-        directionalLight.intensity = 0.02f;
+        directionalLight.color = glm::vec3(1.0f);
+        directionalLight.intensity = 1.0f;
         directionalLight.castShadow = true;
 
         SceneObject& sun = scene.addLight("Directional Light", directionalLight);
         sun.transform.setEulerDegrees(glm::vec3(-29.0f, 59.0f, 0.0f));
-
-        // Art-directed lights approximate nearby neon illumination; Emissive itself does not light other objects.
-        auto addNightPoint = [&](const char* name, glm::vec3 position, glm::vec3 color, float intensity, float range)
-        {
-            Light light;
-            light.type = LightType::Point;
-            light.color = color;
-            light.intensity = intensity;
-            light.range = range;
-            light.castShadow = true;
-            scene.addLight(name, light).transform.position = position;
-        };
-
-        addNightPoint("Night - Cyan upper alley", glm::vec3(-2.0f, -15.0f, -18.0f), glm::vec3(0.035f, 0.45f, 1.0f), 28.0f, 65.0f);
-        addNightPoint("Night - Cyan lower alley", glm::vec3(-8.0f, -65.0f, -55.0f), glm::vec3(0.025f, 0.55f, 1.0f), 45.0f, 90.0f);
-        addNightPoint("Night - Amber sign", glm::vec3(-10.0f, -25.0f, -8.0f), glm::vec3(1.0f, 0.20f, 0.035f), 18.0f, 35.0f);
-        addNightPoint("Night - Magenta sign", glm::vec3(-2.0f, -35.0f, -42.0f), glm::vec3(1.0f, 0.035f, 0.24f), 16.0f, 40.0f);
-        renderer.bloom.intensity = 0.10f;
-
-
-        
-
 
         while (!glfwWindowShouldClose(window))
         {
@@ -356,6 +393,9 @@ int main(int argc, char** argv)
 
             float cameraSpeed = 2.5 * deltaTime;
 
+            if (keyPressedOnce(window, GLFW_KEY_F12) && !ImGui::GetIO().WantTextInput)
+                viewportFullscreen = !viewportFullscreen;
+
             if (keyPressedOnce(window, GLFW_KEY_ESCAPE))
             {
                 if (cameraMouseLocked)
@@ -363,6 +403,10 @@ int main(int argc, char** argv)
                     cameraMouseLocked = false;
                     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
                     firstMouse = true;
+                }
+                else if (viewportFullscreen)
+                {
+                    viewportFullscreen = false;
                 }
                 else
                 {
@@ -394,7 +438,7 @@ int main(int argc, char** argv)
 
                 if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS)
                 {
-                    moveDelta *= 3.0f;
+                    moveDelta *= 10.0f;
                 }
 
                 if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
@@ -466,7 +510,9 @@ int main(int argc, char** argv)
                 {
                     if (ImGui::MenuItem("Import Model..."))
                     {
-                        std::string path = openModelFileDialog();
+                        std::string path = openFileDialog(
+                            "glTF Models (*.gltf;*.glb)\0*.gltf;*.glb\0All Files (*.*)\0*.*\0",
+                            "Import Model");
                         
                         if (!path.empty())
                         {
@@ -476,10 +522,31 @@ int main(int argc, char** argv)
                                 std::filesystem::path filePath(path);
                                 SceneObject& object = scene.addObject(filePath.stem().string(), model);
                                 selectedObject = &object;
+                                selectedMaterialIndex = -1;
+                                focusSelectedObject(camera, selectedObject,
+                                    static_cast<float>(viewportRenderWidth) / viewportRenderHeight);
                             }
                             else
                             {
                                 std::cerr << "Failed to import model: " << path << '\n';
+                            }
+                        }
+                    }
+                    if (ImGui::MenuItem("Import HDR..."))
+                    {
+                        const std::string path = openFileDialog(
+                            "HDR Images (*.hdr)\0*.hdr\0", "Import HDR Environment");
+                        if (!path.empty())
+                        {
+                            if (environmentMap.loadHDR(path))
+                            {
+                                environmentName = std::filesystem::path(path).filename().string();
+                                renderer.invalidateTAAHistory();
+                            }
+                            else
+                            {
+                                hdrImportError = "Could not load the HDR image:\n" + path;
+                                showHDRImportError = true;
                             }
                         }
                     }
@@ -552,8 +619,17 @@ int main(int argc, char** argv)
                     ImGui::EndMenu();
                 }
 
+                if (ImGui::BeginMenu("View"))
+                {
+                    ImGui::MenuItem("Fullscreen Viewport", "F12", &viewportFullscreen);
+                    ImGui::EndMenu();
+                }
+
                 if (ImGui::BeginMenu("Rendering"))
                 {
+                    if (ImGui::MenuItem("SSAO", nullptr, renderer.isSSAOEnabled()))
+                        renderer.setSSAOEnabled(!renderer.isSSAOEnabled());
+
                     if (ImGui::MenuItem("TAA", nullptr, renderer.isTAAEnabled()))
                         renderer.setTAAEnabled(!renderer.isTAAEnabled());
 
@@ -595,6 +671,20 @@ int main(int argc, char** argv)
                 ImGui::EndMainMenuBar();
             }
          
+            if (showHDRImportError)
+            {
+                ImGui::OpenPopup("HDR Import Failed");
+                showHDRImportError = false;
+            }
+            if (ImGui::BeginPopupModal("HDR Import Failed", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                ImGui::TextWrapped("%s", hdrImportError.c_str());
+                ImGui::TextUnformatted("The current environment has been kept.");
+                if (ImGui::Button("OK", ImVec2(100.0f, 0.0f)))
+                    ImGui::CloseCurrentPopup();
+                ImGui::EndPopup();
+            }
+
             renderer.beginTAAFrame(camera);
             
          //DirectionalShadowPass
@@ -617,7 +707,8 @@ int main(int argc, char** argv)
             int lightingDebugView = debugView == 10 ? 0 : debugView;
             renderer.renderDeferredLightingPass(debugQuad, camera, scene, lightingDebugView, environmentMap.getCubemap(), environmentMap.getIrradianceMap(), environmentMap.getPrefilterMap(), environmentMap.getBRDFLUT());
 
-         //TaaPass
+            renderer.renderTransparentPass(scene, camera, lightingDebugView, environmentMap.getIrradianceMap(), environmentMap.getPrefilterMap(), environmentMap.getBRDFLUT());
+
             renderer.renderTAAPass(debugQuad, lightingDebugView);
 
          //BloomPass
@@ -643,8 +734,11 @@ int main(int argc, char** argv)
             }
             ImGuiViewport* viewport = ImGui::GetMainViewport();
 
+            const float statusHeight = ImGui::GetFontSize() + 12.0f;
+            const ImVec2 dockSize(viewport->WorkSize.x, glm::max(viewport->WorkSize.y - statusHeight, 1.0f));
+
             ImGui::SetNextWindowPos(viewport->WorkPos);
-            ImGui::SetNextWindowSize(viewport->WorkSize);
+            ImGui::SetNextWindowSize(dockSize);
             ImGui::SetNextWindowViewport(viewport->ID);
 
             ImGuiWindowFlags dockspaceFlags = ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoBackground;
@@ -668,13 +762,15 @@ int main(int argc, char** argv)
 
                 ImGui::DockBuilderAddNode(dockspaceID, ImGuiDockNodeFlags_DockSpace);
 
-                ImGui::DockBuilderSetNodeSize(dockspaceID, viewport->WorkSize);
+                ImGui::DockBuilderSetNodeSize(dockspaceID, dockSize);
 
                 ImGuiID dockMainID = dockspaceID;
 
-                ImGuiID dockLeftID = ImGui::DockBuilderSplitNode(dockMainID, ImGuiDir_Left, 0.20f, nullptr, &dockMainID);
+                const float leftWidth = glm::clamp(dockSize.x * 0.14f, 210.0f, 260.0f);
+                ImGuiID dockLeftID = ImGui::DockBuilderSplitNode(dockMainID, ImGuiDir_Left, leftWidth / dockSize.x, nullptr, &dockMainID);
 
-                ImGuiID dockRightID = ImGui::DockBuilderSplitNode(dockMainID, ImGuiDir_Right, 0.25f, nullptr, &dockMainID);
+                const float rightWidth = glm::clamp(dockSize.x * 0.22f, 350.0f, 410.0f);
+                ImGuiID dockRightID = ImGui::DockBuilderSplitNode(dockMainID, ImGuiDir_Right, glm::min(rightWidth / (dockSize.x - leftWidth), 0.5f), nullptr, &dockMainID);
 
                 ImGui::DockBuilderDockWindow("Hierarchy", dockLeftID);
 
@@ -690,36 +786,42 @@ int main(int argc, char** argv)
             ImGui::End();
 
             SceneObject* objectToDelete = nullptr;
-            ImGui::Begin("Hierarchy");
-            for (const auto& object : scene.getObjects())
+            if (!viewportFullscreen)
             {
-                ImGui::PushID(object.get());
-                bool selected = (selectedObject == object.get());
-
-                if (ImGui::Selectable(object->name.c_str(), selected))
+                ImGui::Begin("Hierarchy");
+                ImGui::TextDisabled("SCENE  /  %zu OBJECTS", scene.getObjects().size());
+                ImGui::Separator();
+                ImGui::Spacing();
+                for (const auto& object : scene.getObjects())
                 {
-                    selectedObject = object.get();
-                    selectedMaterialIndex = -1;
+                    ImGui::PushID(object.get());
+                    bool selected = (selectedObject == object.get());
 
-                    if (editMode && !selectedObject->light.has_value() && viewportRenderWidth > 0 && viewportRenderHeight > 0)
+                    if (ImGui::Selectable(object->name.c_str(), selected, ImGuiSelectableFlags_None, ImVec2(0.0f, ImGui::GetFrameHeight())))
                     {
-                        float aspectRatio = static_cast<float>(viewportRenderWidth) / static_cast<float>(viewportRenderHeight);
-                        focusSelectedObject(camera, selectedObject, aspectRatio);
+                        selectedObject = object.get();
+                        selectedMaterialIndex = -1;
+
+                        if (editMode && !selectedObject->light.has_value() && viewportRenderWidth > 0 && viewportRenderHeight > 0)
+                        {
+                            float aspectRatio = static_cast<float>(viewportRenderWidth) / static_cast<float>(viewportRenderHeight);
+                            focusSelectedObject(camera, selectedObject, aspectRatio);
+                        }
                     }
-                }
-                if (ImGui::BeginPopupContextItem())
-                {
-                    if (ImGui::MenuItem("Delete"))
+                    if (ImGui::BeginPopupContextItem())
                     {
-                        objectToDelete = object.get();
+                        if (ImGui::MenuItem("Delete"))
+                        {
+                            objectToDelete = object.get();
+                        }
+
+                        ImGui::EndPopup();
                     }
 
-                    ImGui::EndPopup();
+                    ImGui::PopID();
                 }
-
-                ImGui::PopID();
+                ImGui::End();
             }
-            ImGui::End();
             if (selectedObject != nullptr && ImGui::IsKeyPressed(ImGuiKey_Delete) && !ImGui::GetIO().WantTextInput && !ImGui::IsAnyItemActive())
             {
                 objectToDelete = selectedObject;
@@ -737,7 +839,19 @@ int main(int argc, char** argv)
             }
 
             bool viewportResizePending = false;
-            ImGui::Begin("Viewport");
+            ImGuiWindowFlags viewportFlags = ImGuiWindowFlags_None;
+            if (viewportFullscreen)
+            {
+                ImGui::SetNextWindowPos(viewport->WorkPos);
+                ImGui::SetNextWindowSize(viewport->WorkSize);
+                ImGui::SetNextWindowViewport(viewport->ID);
+                viewportFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                    ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings;
+            }
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
+                viewportFullscreen ? ImVec2(0.0f, 0.0f) : ImVec2(6.0f, 6.0f));
+            ImGui::Begin(viewportFullscreen ? "Viewport Fullscreen" : "Viewport", nullptr, viewportFlags);
+            ImGui::PopStyleVar();
             viewportHovered = ImGui::IsWindowHovered();
             ImVec2 viewportSize = ImGui::GetContentRegionAvail();
             
@@ -784,6 +898,8 @@ int main(int argc, char** argv)
                 float localY = mousePos.y - imageMin.y;
                 int pixelX = static_cast<int>(localX / viewportSize.x * viewportRenderWidth);
                 int pixelY = viewportRenderHeight - 1 - static_cast<int>(localY / viewportSize.y * viewportRenderHeight);
+                renderer.renderTransparentPickingPass(scene);
+
                 unsigned int objectID = renderer.readObjectID(pixelX, pixelY);
                 unsigned int materialID = renderer.readMaterialID(pixelX, pixelY);
                 const auto& objects = scene.getObjects();
@@ -812,124 +928,169 @@ int main(int argc, char** argv)
 
             ImGui::End();
 
-            ImGui::Begin("Inspector");
-
-            float fps = ImGui::GetIO().Framerate;
-            ImGui::Text("FPS: %.1f", fps);
-            ImGui::Text("Frame: %.2f ms", fps > 0.0f ? 1000.0f / fps : 0.0f);
-
-            if (selectedObject != nullptr)
+            if (!viewportFullscreen)
             {
-                ImGui::TextUnformatted(selectedObject->name.c_str());
-                ImGui::Separator();
-                ImGui::TextUnformatted("Transform");
-                ImGui::DragFloat3("Position", &selectedObject->transform.position.x, 0.05f);
-                glm::vec3 eulerDegrees = selectedObject->transform.getEulerDegrees();
+                ImGui::Begin("Inspector");
 
-                if (ImGui::DragFloat3("Rotation", &eulerDegrees.x, 0.5f))
+                if (selectedObject != nullptr)
                 {
-                    selectedObject->transform.setEulerDegrees(eulerDegrees);
-                }
+                    ImGui::TextUnformatted(selectedObject->name.c_str());
+                    ImGui::TextDisabled(selectedObject->light.has_value() ? "LIGHT OBJECT" : "MESH OBJECT");
+                    ImGui::Spacing();
 
-                ImGui::DragFloat3("Scale", &selectedObject->transform.scale.x, 0.05f);
-
-                if (selectedObject->light.has_value())
-                {
-                    Light& light = selectedObject->light.value();
-
-                    ImGui::Separator();
-                    ImGui::TextUnformatted("Light");
-
-                    ImGui::ColorEdit3("Color", &light.color.x);
-                    ImGui::DragFloat("Intensity", &light.intensity, 0.1f, 0.0f, 100.0f);
-                    
-                    if (light.type == LightType::Point || light.type == LightType::Spot)
+                    if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen))
                     {
-                        ImGui::DragFloat("Range", &light.range, 0.1f, 0.1f, 100.0f);
-                    }
-
-                    if (light.type == LightType::Spot)
-                    {
-                        ImGui::DragFloat("Inner Angle", &light.innerAngle, 0.5f, 0.0f, 90.0f);
-                        ImGui::DragFloat("Outer Angle", &light.outerAngle, 0.5f, 0.0f, 90.0f);
-                    }
-                    ImGui::Checkbox("Cast Shadow", &light.castShadow);
-                }
-
-                if (selectedObject->model != nullptr)
-                {
-                    ImGui::Separator();
-                    ImGui::TextUnformatted("Material");
-
-                    std::size_t materialCount = selectedObject->model->getMaterialCount();
-                    std::string materialPreview = "None";
-
-                    if (selectedMaterialIndex >= 0 && static_cast<std::size_t>(selectedMaterialIndex) < materialCount)
-                    {
-                        materialPreview = "Materail" + std::to_string(selectedMaterialIndex);
-                    }
-                    if (ImGui::BeginCombo("Material Slot", materialPreview.c_str()))
-                    {
-                        for (std::size_t i = 0; i < materialCount; ++i)
+                        if (beginInspectorProperties("TransformProperties"))
                         {
-                            bool selected = selectedMaterialIndex == static_cast<int>(i);
-                            std::string label = "Material" + std::to_string(i);
-
-                            if (ImGui::Selectable(label.c_str(), selected))
-                            {
-                                selectedMaterialIndex = static_cast<int>(i);
-                            }
-
-                            if (selected)
-                            {
-                                ImGui::SetItemDefaultFocus();
-                            }
-                        }
-
-                        ImGui::EndCombo();
-                    }
-
-                    if (selectedMaterialIndex >= 0 && static_cast<std::size_t>(selectedMaterialIndex) < materialCount)
-                    {
-                        Material& material = selectedObject->model->getMaterial(static_cast<std::size_t>(selectedMaterialIndex));
-
-                        ImGui::ColorEdit4("Base Color", &material.baseColorFactor.x);
-                        ImGui::ColorEdit3("Emissive Factor (linear)", &material.emissiveFactor.x);
-                        ImGui::DragFloat("Emissive Strength", &material.emissiveStrength, 0.1f, 0.0f, 10000.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
-                        ImGui::TextDisabled(material.emissiveMap ? "Emissive texture: loaded" : "Emissive texture: none");
-                        ImGui::SliderFloat("Metallic", &material.metallicFactor, 0.0f, 1.0f);
-                        ImGui::SliderFloat("Roughness", &material.roughnessFactor, 0.0f, 1.0f);
-                        ImGui::Checkbox("Double Sided", &material.doubleSided);
-                        ImGui::Combo("Alpha Mode", &material.alphaMode, "Opaque\0Mask\0Blend (unsupported)\0");
-
-                        if (material.alphaMode == 1)
-                        {
-                            ImGui::SliderFloat("Alpha Cutoff", &material.alphaCutoff, 0.0f, 1.0f);
+                            inspectorProperty("Position");
+                            ImGui::DragFloat3("##Position", &selectedObject->transform.position.x, 0.05f, 0.0f, 0.0f, "%.2f");
+                            glm::vec3 eulerDegrees = selectedObject->transform.getEulerDegrees();
+                            inspectorProperty("Rotation");
+                            if (ImGui::DragFloat3("##Rotation", &eulerDegrees.x, 0.5f, 0.0f, 0.0f, "%.1f"))
+                                selectedObject->transform.setEulerDegrees(eulerDegrees);
+                            inspectorProperty("Scale");
+                            ImGui::DragFloat3("##Scale", &selectedObject->transform.scale.x, 0.05f, 0.0f, 0.0f, "%.2f");
+                            ImGui::EndTable();
                         }
                     }
-                    else
+
+                    if (selectedObject->light.has_value() &&
+                        ImGui::CollapsingHeader("Light", ImGuiTreeNodeFlags_DefaultOpen))
                     {
-                        ImGui::TextDisabled("Click a surface in the Viewport to select its material.");
+                        Light& light = selectedObject->light.value();
+                        if (beginInspectorProperties("LightProperties"))
+                        {
+                            inspectorProperty("Color");
+                            ImGui::ColorEdit3("##LightColor", &light.color.x, ImGuiColorEditFlags_NoInputs);
+                            inspectorProperty("Intensity");
+                            ImGui::DragFloat("##Intensity", &light.intensity, 0.1f, 0.0f, 100.0f);
+                            if (light.type == LightType::Point || light.type == LightType::Spot)
+                            {
+                                inspectorProperty("Range");
+                                ImGui::DragFloat("##Range", &light.range, 0.1f, 0.1f, 100.0f);
+                            }
+                            if (light.type == LightType::Spot)
+                            {
+                                inspectorProperty("Inner Angle");
+                                ImGui::DragFloat("##InnerAngle", &light.innerAngle, 0.5f, 0.0f, 90.0f);
+                                inspectorProperty("Outer Angle");
+                                ImGui::DragFloat("##OuterAngle", &light.outerAngle, 0.5f, 0.0f, 90.0f);
+                            }
+                            inspectorProperty("Shadows");
+                            ImGui::Checkbox("##CastShadow", &light.castShadow);
+                            ImGui::EndTable();
+                        }
                     }
+
+                    if (selectedObject->model != nullptr &&
+                        ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen))
+                    {
+                        const std::size_t materialCount = selectedObject->model->getMaterialCount();
+                        std::string materialPreview = "Select a material";
+                        if (selectedMaterialIndex >= 0 && static_cast<std::size_t>(selectedMaterialIndex) < materialCount)
+                            materialPreview = "Material " + std::to_string(selectedMaterialIndex);
+
+                        if (beginInspectorProperties("MaterialProperties"))
+                        {
+                            inspectorProperty("Slot");
+                            if (ImGui::BeginCombo("##MaterialSlot", materialPreview.c_str()))
+                            {
+                                for (std::size_t i = 0; i < materialCount; ++i)
+                                {
+                                    const bool selected = selectedMaterialIndex == static_cast<int>(i);
+                                    const std::string label = "Material " + std::to_string(i);
+                                    if (ImGui::Selectable(label.c_str(), selected))
+                                        selectedMaterialIndex = static_cast<int>(i);
+                                    if (selected)
+                                        ImGui::SetItemDefaultFocus();
+                                }
+                                ImGui::EndCombo();
+                            }
+
+                            if (selectedMaterialIndex >= 0 && static_cast<std::size_t>(selectedMaterialIndex) < materialCount)
+                            {
+                                Material& material = selectedObject->model->getMaterial(static_cast<std::size_t>(selectedMaterialIndex));
+                                inspectorProperty("Base Color");
+                                ImGui::ColorEdit4("##BaseColor", &material.baseColorFactor.x,
+                                    ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar);
+                                inspectorProperty("Emission");
+                                ImGui::ColorEdit3("##Emission", &material.emissiveFactor.x,
+                                    ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_Float | ImGuiColorEditFlags_HDR);
+                                inspectorProperty("Strength");
+                                ImGui::DragFloat("##EmissiveStrength", &material.emissiveStrength,
+                                    0.1f, 0.0f, 10000.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+                                inspectorProperty("Metallic");
+                                ImGui::SliderFloat("##Metallic", &material.metallicFactor, 0.0f, 1.0f, "%.2f");
+                                inspectorProperty("Roughness");
+                                ImGui::SliderFloat("##Roughness", &material.roughnessFactor, 0.0f, 1.0f, "%.2f");
+                                inspectorProperty("Two-sided");
+                                ImGui::Checkbox("##DoubleSided", &material.doubleSided);
+                                inspectorProperty("Alpha Mode");
+                                ImGui::Combo("##AlphaMode", &material.alphaMode, "Opaque\0Mask\0Blend\0");
+                                if (material.alphaMode == 1)
+                                {
+                                    inspectorProperty("Cutoff");
+                                    ImGui::SliderFloat("##AlphaCutoff", &material.alphaCutoff, 0.0f, 1.0f, "%.2f");
+                                }
+                                if (material.alphaMode == 2)
+                                {
+                                    inspectorProperty("Opacity");
+                                    ImGui::SliderFloat("##Opacity", &material.baseColorFactor.a, 0.0f, 1.0f, "%.2f");
+                                }
+                            }
+                            ImGui::EndTable();
+                        }
+                        if (selectedMaterialIndex < 0 || static_cast<std::size_t>(selectedMaterialIndex) >= materialCount)
+                            ImGui::TextWrapped("Click a surface in the viewport or choose a material slot.");
+                    }
+
+                    ImGui::Spacing();
+                    ImGui::Separator();
+                    ImGui::Spacing();
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.28f, 0.15f, 0.17f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.43f, 0.20f, 0.23f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.53f, 0.23f, 0.26f, 1.0f));
+                    if (ImGui::Button("Delete Object", ImVec2(-1.0f, 0.0f)))
+                    {
+                        SceneObject* objectToDelete = selectedObject;
+                        selectedObject = nullptr;
+                        selectedMaterialIndex = -1;
+                        scene.removeObject(objectToDelete);
+                    }
+                    ImGui::PopStyleColor(3);
                 }
-
-                ImGui::Separator();
-
-                if (ImGui::Button("Delete Object"))
+                else
                 {
-                    SceneObject* objectToDelete = selectedObject;
-
-                    selectedObject = nullptr;
-                    selectedMaterialIndex = -1;
-
-                    scene.removeObject(objectToDelete);
+                    ImGui::Spacing();
+                    ImGui::TextDisabled("NO SELECTION");
+                    ImGui::TextWrapped("Select an object in the scene or hierarchy to inspect its properties.");
                 }
+                ImGui::End();
+
+                const ImGuiWindowFlags statusFlags = ImGuiWindowFlags_NoDecoration |
+                    ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                    ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoScrollWithMouse |
+                    ImGuiWindowFlags_NoScrollbar;
+                ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x,
+                    viewport->WorkPos.y + viewport->WorkSize.y - statusHeight));
+                ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x, statusHeight));
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14.0f, 5.0f));
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+                ImGui::Begin("EditorStatus", nullptr, statusFlags);
+                const float fps = ImGui::GetIO().Framerate;
+                ImGui::TextDisabled("%.0f FPS  /  %.2f ms", fps, fps > 0.0f ? 1000.0f / fps : 0.0f);
+                ImGui::SameLine(0.0f, 24.0f);
+                ImGui::TextDisabled("%d x %d", viewportRenderWidth, viewportRenderHeight);
+                ImGui::SameLine(0.0f, 24.0f);
+                ImGui::TextDisabled(renderer.isTAAEnabled() ? "TAA ON" : "TAA OFF");
+                if (viewport->WorkSize.x > 1000.0f)
+                {
+                    ImGui::SameLine(0.0f, 24.0f);
+                    ImGui::TextDisabled("HDR: %s", environmentName.empty() ? "None (File > Import HDR...)" : environmentName.c_str());
+                }
+                ImGui::End();
+                ImGui::PopStyleVar(2);
             }
-            else
-            {
-                ImGui::TextUnformatted("No object selected");
-            }
-            ImGui::End();
 
             ImGui::Render();
             ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());

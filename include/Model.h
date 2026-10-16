@@ -1,27 +1,36 @@
 #pragma once
 
-#include "Mesh.h"
+#include"Mesh.h"
 #include"Texture.h"
-#include "Material.h"
-#include "Shader.h"
+#include"Material.h"
+#include"Shader.h"
 
 #include<glm/glm.hpp> 
 #include<memory>
 #include<unordered_map>
-#include <assimp/scene.h>
+#include<assimp/scene.h>
 
-#include <string>
-#include <vector>
+#include<string>
+#include<vector>
+#include<optional>
+
+enum class MeshPass
+{
+    Opaque,
+    Transparent
+};
 
 class Model
 {
 public:
     explicit Model(const std::string& path, bool directXNormals = false);
 
-    void draw(Shader& shader) const;
+    void draw(Shader& shader, MeshPass pass = MeshPass::Opaque, std::optional<std::size_t> onlyMesh = std::nullopt) const;
     void drawGeometry() const;
     void drawShadow(Shader& shader) const;
     void drawShadowCulled(Shader& shader, const glm::mat4& localTOShadowClip, float clipMargin) const;
+
+    glm::vec3 getMeshLocalCenter(std::size_t index) const;
 
     bool isLoaded() const;
 

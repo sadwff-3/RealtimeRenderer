@@ -3,6 +3,7 @@
 #include"Shader.h"
 
 #include <glad/gl.h>
+#include <string>
 
 class Texture;
 
@@ -12,6 +13,7 @@ public:
     EnvironmentMap();
     ~EnvironmentMap();
 
+    bool loadHDR(const std::string& path);
     void generate(Texture& hdrTexture);
     void generateIrradiance();
     void generatePrefilter();

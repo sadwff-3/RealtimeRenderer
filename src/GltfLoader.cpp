@@ -151,6 +151,11 @@ void Model::loadGltf(const std::string& path) {
 
     fastgltf::Asset asset = std::move(parsed.get());
     const bool bistroPacking = filePath.stem().string().starts_with("Bistro");
+    const bool cityBlendExport = filePath.filename() == "city.glb" &&
+        baseDir.filename() == "city" && asset.materials.size() == 220 &&
+        std::all_of(asset.materials.begin(), asset.materials.end(), [](const auto& material) {
+            return material.alphaMode == fastgltf::AlphaMode::Blend;
+        });
 
     // NEW??glTF ?????????????
     auto loadGltfTexture = [&](std::size_t textureIndex, bool srgb) -> Texture* {
@@ -302,11 +307,20 @@ void Model::loadGltf(const std::string& path) {
         case fastgltf::AlphaMode::Blend: out.alphaMode = 2; break;
         default: out.alphaMode = 0; break;
         }
-        // This city export labels all materials BLEND; only foliage uses cutout alpha.
-        std::string materialName(m.name);
-        std::transform(materialName.begin(), materialName.end(), materialName.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        const bool cityFoliage = filePath.filename() == "city.glb" && baseDir.filename() == "city" && (materialName.find("leaf") != std::string::npos || materialName.find("leaves") != std::string::npos || materialName.find("foliage") != std::string::npos || materialName.find("grass_blades") != std::string::npos || materialName.find("pink_flower") != std::string::npos || materialName.find("fern_fiddlehead") != std::string::npos || materialName.find("hedge_base") != std::string::npos);
-        if (out.alphaMode == 2 && cityFoliage) out.alphaMode = 1;
+        if (cityBlendExport && out.alphaMode == 2)
+        {
+            std::string materialName(m.name);
+            std::transform(materialName.begin(), materialName.end(), materialName.begin(),
+                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            const bool cutout = materialName.find("leaf") != std::string::npos ||
+                materialName.find("leaves") != std::string::npos ||
+                materialName.find("grass_blades") != std::string::npos ||
+                materialName.find("pink_flower") != std::string::npos ||
+                materialName.find("fern_fiddlehead") != std::string::npos ||
+                materialName.find("hedge_base") != std::string::npos ||
+                materialName.starts_with("cards.doublesided");
+            out.alphaMode = cutout ? 1 : 0;
+        }
         out.doubleSided = m.doubleSided;
         out.alphaCutoff = static_cast<float>(m.alphaCutoff);
 

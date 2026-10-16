@@ -5,6 +5,9 @@
 #include<glm/gtc/matrix_transform.hpp>
 #include<array>
 #include<iostream>
+#include<algorithm>
+#include<cctype>
+#include<filesystem>
 
 
 EnvironmentMap::EnvironmentMap() : equirectangularShader("shaders/equirectangular.vert", "shaders/equirectangular.frag"), irradianceShader("shaders/equirectangular.vert", "shaders/irradiance_convolution.frag"), prefilterShader("shaders/equirectangular.vert", "shaders/prefilter.frag"), brdfShader("shaders/brdf.vert", "shaders/brdf.frag")
@@ -101,6 +104,15 @@ EnvironmentMap::EnvironmentMap() : equirectangularShader("shaders/equirectangula
 	irradianceShader.setInt("environmentMap", 0);
 	prefilterShader.use();
 	prefilterShader.setInt("environmentMap", 0);
+
+	const GLfloat black[3] = { 0.0f, 0.0f, 0.0f };
+	glClearTexImage(cubemap, 0, GL_RGB, GL_FLOAT, black);
+	glGenerateTextureMipmap(cubemap);
+	glClearTexImage(irradianceMap, 0, GL_RGB, GL_FLOAT, black);
+	for (int mip = 0; mip < PREFILTER_MIP_LEVELS; ++mip)
+		glClearTexImage(prefilterMap, mip, GL_RGB, GL_FLOAT, black);
+
+	generateBRDFLUT();
 }
 
 
@@ -184,6 +196,53 @@ void EnvironmentMap::renderCube() const
 	glBindVertexArray(0);
 }
 
+
+bool EnvironmentMap::loadHDR(const std::string& path)
+{
+	std::string extension = std::filesystem::path(path).extension().string();
+	std::transform(extension.begin(), extension.end(), extension.begin(),
+		[](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+	if (extension != ".hdr")
+		return false;
+
+	Texture hdrTexture(path.c_str());
+	if (!hdrTexture.valid())
+		return false;
+
+	GLint previousDrawFBO, previousReadFBO, previousProgram;
+	GLint previousVAO, previousRenderbuffer, previousDepthFunc;
+	GLboolean previousDepthMask;
+	const GLboolean previousDepthTest = glIsEnabled(GL_DEPTH_TEST);
+	const GLboolean previousBlend = glIsEnabled(GL_BLEND);
+	const GLboolean previousScissor = glIsEnabled(GL_SCISSOR_TEST);
+	glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &previousDrawFBO);
+	glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &previousReadFBO);
+	glGetIntegerv(GL_CURRENT_PROGRAM, &previousProgram);
+	glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &previousVAO);
+	glGetIntegerv(GL_RENDERBUFFER_BINDING, &previousRenderbuffer);
+	glGetIntegerv(GL_DEPTH_FUNC, &previousDepthFunc);
+	glGetBooleanv(GL_DEPTH_WRITEMASK, &previousDepthMask);
+
+	glDisable(GL_BLEND);
+	glDisable(GL_SCISSOR_TEST);
+	glDepthFunc(GL_LESS);
+	glDepthMask(GL_TRUE);
+	generate(hdrTexture);
+	generateIrradiance();
+	generatePrefilter();
+
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, previousDrawFBO);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, previousReadFBO);
+	glBindRenderbuffer(GL_RENDERBUFFER, previousRenderbuffer);
+	glBindVertexArray(previousVAO);
+	glUseProgram(previousProgram);
+	glDepthFunc(previousDepthFunc);
+	glDepthMask(previousDepthMask);
+	if (previousDepthTest) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
+	if (previousBlend) glEnable(GL_BLEND); else glDisable(GL_BLEND);
+	if (previousScissor) glEnable(GL_SCISSOR_TEST); else glDisable(GL_SCISSOR_TEST);
+	return true;
+}
 
 void EnvironmentMap::generate(Texture& hdrTexture)
 {

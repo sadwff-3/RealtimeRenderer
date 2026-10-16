@@ -155,10 +155,12 @@ add_dependencies(renderer renderer_shaders)
 
 # ---------------- Assets ----------------
 
-add_custom_command(
-    TARGET renderer POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    "${CMAKE_SOURCE_DIR}/assets"
-    "$<TARGET_FILE_DIR:renderer>/assets"
-    VERBATIM
-)
+if(EXISTS "${CMAKE_SOURCE_DIR}/assets")
+    add_custom_command(
+        TARGET renderer POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_SOURCE_DIR}/assets"
+        "$<TARGET_FILE_DIR:renderer>/assets"
+        VERBATIM
+    )
+endif()

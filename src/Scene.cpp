@@ -30,6 +30,10 @@ bool Scene::removeObject(SceneObject* object)
 	if (it == objects.end())
 		return false;
 
+	lightObjects.erase(
+		std::remove(lightObjects.begin(), lightObjects.end(), object),
+		lightObjects.end());
+
 	objects.erase(it);
 
 	return true;

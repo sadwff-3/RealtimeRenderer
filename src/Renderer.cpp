@@ -35,7 +35,7 @@ namespace
 }
 
 
-Renderer::Renderer(int width, int height) :shadowShader("shaders/shadow_depth.vert", "shaders/shadow_depth.frag"), pointShadowShader("shaders/point_shadow.vert", "shaders/point_shadow.frag"), sceneShader("shaders/pbr.vert", "shaders/pbr.frag"), screenShader("shaders/screen.vert", "shaders/screen.frag"), geometryShader("shaders/gbuffer.vert", "shaders/gbuffer.frag"), ssaoShader("shaders/screen.vert", "shaders/ssao.frag"), ssaoBlurShader("shaders/screen.vert", "shaders/ssao_blur.frag"), deferredShader("shaders/screen.vert", "shaders/deferred_lighting.frag"), taaShader("shaders/screen.vert", "shaders/taa_resolve.frag"), bloomDownsampleShader("shaders/screen.vert", "shaders/bloom_downsample.frag"), bloomUpsampleShader("shaders/screen.vert", "shaders/bloom_upsample.frag"), framebufferWidth(width), framebufferHeight(height)
+Renderer::Renderer(int width, int height) :shadowShader("shaders/shadow_depth.vert", "shaders/shadow_depth.frag"), pointShadowShader("shaders/point_shadow.vert", "shaders/point_shadow.frag"), sceneShader("shaders/pbr.vert", "shaders/pbr.frag"), screenShader("shaders/screen.vert", "shaders/screen.frag"), geometryShader("shaders/gbuffer.vert", "shaders/gbuffer.frag"), ssaoShader("shaders/screen.vert", "shaders/ssao.frag"), ssaoBlurShader("shaders/screen.vert", "shaders/ssao_blur.frag"), deferredShader("shaders/screen.vert", "shaders/deferred_lighting.frag"), taaShader("shaders/screen.vert", "shaders/taa_resolve.frag"), bloomDownsampleShader("shaders/screen.vert", "shaders/bloom_downsample.frag"), bloomUpsampleShader("shaders/screen.vert", "shaders/bloom_upsample.frag"), transparentShader("shaders/transparent.vert", "shaders/transparent.frag"), transparentPickShader("shaders/transparent.vert", "shaders/transparent_pick.frag"), framebufferWidth(width), framebufferHeight(height)
 {
 	initSceneFramebuffer();
 	initFinalFramebuffer();
@@ -363,9 +363,9 @@ void Renderer::initSceneFramebuffer()
 
 	glGenRenderbuffers(1, &sceneRBO);
 	glBindRenderbuffer(GL_RENDERBUFFER, sceneRBO);
-	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, framebufferWidth, framebufferHeight);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, framebufferWidth, framebufferHeight);
 
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, sceneRBO);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, sceneRBO);
 
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
 	{
@@ -1032,6 +1032,13 @@ void Renderer::renderGeometryPass(const Scene& scene, Camera& camera)
 
 void Renderer::renderSSAOPass(Mesh& quad, Camera& camera)
 {
+	if (!ssaoEnabled)
+	{
+		const GLfloat white = 1.0f;
+		glClearTexImage(ssaoTexture, 0, GL_RED, GL_FLOAT, &white);
+		return;
+	}
+
 	glBindFramebuffer(GL_FRAMEBUFFER, ssaoFBO);
 	glViewport(0, 0, framebufferWidth, framebufferHeight);
 
@@ -1071,6 +1078,13 @@ void Renderer::renderSSAOPass(Mesh& quad, Camera& camera)
 
 void Renderer::renderSSAOBlurPass(Mesh& quad)
 {
+	if (!ssaoEnabled)
+	{
+		const GLfloat white = 1.0f;
+		glClearTexImage(ssaoBlurTexture, 0, GL_RED, GL_FLOAT, &white);
+		return;
+	}
+
 	glBindFramebuffer(GL_FRAMEBUFFER, ssaoBlurFBO);
 	glViewport(0, 0, framebufferWidth, framebufferHeight);
 
@@ -1362,8 +1376,341 @@ void Renderer::renderTAAPass(Mesh& quad, int debugView)
 	taaHistoryReadIndex = writeIndex;
 	taaHistoryValid = true;
 
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, taaHistoryFBO[taaHistoryReadIndex]);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, sceneFBO);
+	glBlitFramebuffer(0, 0, framebufferWidth, framebufferHeight, 0, 0, framebufferWidth, framebufferHeight, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glEnable(GL_DEPTH_TEST);
+}
+
+
+void Renderer::renderTransparentPass(const Scene& scene, Camera& camera, int debugView, unsigned int irradianceMap, unsigned int prefilterMap, unsigned int brdfLUT)
+{
+	if (debugView != 0)
+		return;
+
+	copyOpaqueDepthToScene();
+
+	glBindFramebuffer(GL_FRAMEBUFFER, sceneFBO);
+	glViewport(0, 0, framebufferWidth, framebufferHeight);
+
+	glEnable(GL_DEPTH_TEST);
+	glDepthFunc(GL_LESS);
+	glDepthMask(GL_FALSE);
+
+	glEnable(GL_BLEND);
+	glBlendEquation(GL_FUNC_ADD);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+	struct TransparentCommand
+	{
+		const SceneObject* object;
+		std::size_t meshIndex;
+		float depth;
+	};
+
+	std::vector<TransparentCommand> commands;
+
+	for (const auto& object : scene.getObjects())
+	{
+		if (!object->model)
+			continue;
+
+		glm::mat4 modelMatrix = object->transform.getMatrix();
+
+		for (std::size_t i = 0; i < object->model->getMaterialCount(); ++i)
+		{
+			const Material& material = object->model->getMaterial(i);
+
+			if (material.alphaMode != 2)
+				continue;
+
+			glm::vec3 localCenter = object->model->getMeshLocalCenter(i);
+			glm::vec4 worldCenter = modelMatrix * glm::vec4(localCenter, 1.0f);
+			glm::vec4 viewCenter = frameView * worldCenter;
+
+			float depth = -viewCenter.z;
+
+			commands.push_back({ object.get(), i, depth });
+		}
+	}
+
+	std::stable_sort(commands.begin(), commands.end(), [](const TransparentCommand& a, const TransparentCommand& b)
+		{
+			return a.depth > b.depth;
+		});
+
+	transparentShader.use();
+
+	transparentShader.setMat4("view", frameView);
+	transparentShader.setMat4("projection", frameProjection);
+
+	transparentShader.setInt("directionalShadowMaps", 7);
+	glActiveTexture(GL_TEXTURE7);
+	glBindTexture(GL_TEXTURE_2D_ARRAY, directionalShadowArray);
+
+	transparentShader.setInt("spotShadowMaps", 8);
+	glActiveTexture(GL_TEXTURE8);
+	glBindTexture(GL_TEXTURE_2D_ARRAY, spotShadowArray);
+
+	transparentShader.setInt("pointShadowMaps", 9);
+	glActiveTexture(GL_TEXTURE9);
+	glBindTexture(GL_TEXTURE_CUBE_MAP_ARRAY, pointShadowArray);
+
+	transparentShader.setInt("irradianceMap", 10);
+	glActiveTexture(GL_TEXTURE10);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, irradianceMap);
+
+	transparentShader.setInt("prefilterMap", 11);
+	glActiveTexture(GL_TEXTURE11);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, prefilterMap);
+
+	transparentShader.setInt("brdfLUT", 12);
+	glActiveTexture(GL_TEXTURE12);
+	glBindTexture(GL_TEXTURE_2D, brdfLUT);
+
+	transparentShader.setVec3("viewPos", camera.Position);
+	transparentShader.setMat4("csmView", frameView);
+
+	for (int i = 0; i < CASCADE_COUNT; ++i)
+	{
+		transparentShader.setFloat(
+			"cascadeSplits[" + std::to_string(i) + "]",
+			cascadeSplits[i]);
+	}
+
+	for (int i = 0; i < MAX_DIRECTIONAL_SHADOWS * CASCADE_COUNT; ++i)
+	{
+		transparentShader.setMat4(
+			"cascadeLightSpaceMatrices[" + std::to_string(i) + "]",
+			directionalCascadeMatrices[i]);
+	}
+
+	int directionalCount = 0;
+	int directionalShadowIndex = 0;
+
+	for (const SceneObject* object : scene.getLights())
+	{
+		if (!object->light.has_value())
+			continue;
+
+		const Light& light = object->light.value();
+		if (light.type != LightType::Directional)
+			continue;
+		if (directionalCount >= MAX_DIRECTIONAL_SHADOWS)
+			break;
+
+		const std::string base =
+			"directionalLights[" + std::to_string(directionalCount) + "]";
+
+		transparentShader.setVec3(base + ".direction", object->transform.getForward());
+		transparentShader.setVec3(base + ".color", light.color);
+		transparentShader.setFloat(base + ".intensity", light.intensity);
+
+		int shadowLayer = -1;
+		if (light.castShadow && directionalShadowIndex < directionalShadowCount)
+			shadowLayer = directionalShadowIndex++;
+
+		transparentShader.setInt(base + ".shadowLayer", shadowLayer);
+		++directionalCount;
+	}
+
+	transparentShader.setInt("directionalLightCount", directionalCount);
+
+	int pointCount = 0;
+	int pointShadowIndex = 0;
+
+	for (const SceneObject* object : scene.getLights())
+	{
+		if (!object->light.has_value())
+			continue;
+
+		const Light& light = object->light.value();
+		if (light.type != LightType::Point || light.intensity <= 0.0f)
+			continue;
+		if (pointCount >= 4)
+			break;
+
+		const std::string base =
+			"pointLights[" + std::to_string(pointCount) + "]";
+
+		transparentShader.setVec3(base + ".position", object->transform.position);
+		transparentShader.setVec3(base + ".color", light.color);
+		transparentShader.setFloat(base + ".intensity", light.intensity);
+		transparentShader.setFloat(base + ".constant", 1.0f);
+		transparentShader.setFloat(base + ".linear", 0.09f);
+		transparentShader.setFloat(base + ".quadratic", 0.032f);
+		transparentShader.setFloat(base + ".farPlane", light.range);
+
+		int shadowLayer = -1;
+		if (light.castShadow && pointShadowIndex < pointShadowCount)
+			shadowLayer = pointShadowIndex++;
+
+		transparentShader.setInt(base + ".shadowLayer", shadowLayer);
+		++pointCount;
+	}
+
+	transparentShader.setInt("pointLightCount", pointCount);
+
+	int spotCount = 0;
+	int spotShadowIndex = 0;
+
+	for (const SceneObject* object : scene.getLights())
+	{
+		if (!object->light.has_value())
+			continue;
+
+		const Light& light = object->light.value();
+		if (light.type != LightType::Spot)
+			continue;
+		if (spotCount >= MAX_SPOT_SHADOWS)
+			break;
+
+		const std::string base =
+			"spotLights[" + std::to_string(spotCount) + "]";
+
+		transparentShader.setVec3(base + ".position", object->transform.position);
+		transparentShader.setVec3(base + ".direction", object->transform.getForward());
+		transparentShader.setVec3(base + ".color", light.color);
+		transparentShader.setFloat(base + ".intensity", light.intensity);
+		transparentShader.setFloat(base + ".range", light.range);
+		transparentShader.setFloat(base + ".innerCutoff", glm::cos(glm::radians(light.innerAngle)));
+		transparentShader.setFloat(base + ".outerCutoff", glm::cos(glm::radians(light.outerAngle)));
+
+		int shadowLayer = -1;
+		if (light.castShadow && spotShadowIndex < spotShadowCount)
+		{
+			shadowLayer = spotShadowIndex;
+			transparentShader.setMat4(
+				base + ".lightSpaceMatrix",
+				spotLightSpaceMatrices[spotShadowIndex]);
+			++spotShadowIndex;
+		}
+
+		transparentShader.setInt(base + ".shadowLayer", shadowLayer);
+		++spotCount;
+	}
+
+	transparentShader.setInt("spotLightCount", spotCount);
+
+	for (const auto& command : commands)
+	{
+		const SceneObject* object = command.object;
+
+		transparentShader.setMat4("model", object->transform.getMatrix());
+
+		object->model->draw(transparentShader, MeshPass::Transparent, command.meshIndex);
+	}
+
+	glDisable(GL_BLEND);
+	glDepthMask(GL_TRUE);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+
+void Renderer::renderTransparentPickingPass(const Scene& scene)
+{
+	GLint previousDrawFBO = 0;
+	GLint previousDepthFunc = GL_LESS;
+	GLint previousProgram = 0;
+	GLint previousActiveTexture = GL_TEXTURE0;
+	GLint previousViewport[4];
+
+	GLboolean previousDepthMask = GL_TRUE;
+	const GLboolean previousDepthTest = glIsEnabled(GL_DEPTH_TEST);
+	const GLboolean previousBlend = glIsEnabled(GL_BLEND);
+
+	glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &previousDrawFBO);
+	glGetIntegerv(GL_DEPTH_FUNC, &previousDepthFunc);
+	glGetIntegerv(GL_CURRENT_PROGRAM, &previousProgram);
+	glGetIntegerv(GL_ACTIVE_TEXTURE, &previousActiveTexture);
+	glGetIntegerv(GL_VIEWPORT, previousViewport);
+	glGetBooleanv(GL_DEPTH_WRITEMASK, &previousDepthMask);
+
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gBuffer);
+	glViewport(0, 0, framebufferWidth, framebufferHeight);
+
+
+	const GLenum pickingBuffers[] =
+	{
+		GL_COLOR_ATTACHMENT3,
+		GL_COLOR_ATTACHMENT4
+	};
+
+	glDrawBuffers(2, pickingBuffers);
+
+	glEnable(GL_DEPTH_TEST);
+	glDepthFunc(GL_LESS);
+	glDepthMask(GL_TRUE);
+	glDisable(GL_BLEND);
+
+	transparentPickShader.use();
+	transparentPickShader.setMat4("view", frameView);
+	transparentPickShader.setMat4("projection", frameProjection);
+
+	const auto& objects = scene.getObjects();
+
+	for (std::size_t i = 0; i < objects.size(); ++i)
+	{
+		const auto& object = objects[i];
+
+		if (!object->model)
+			continue;
+
+		transparentPickShader.setMat4(
+			"model",
+			object->transform.getMatrix());
+
+		transparentPickShader.setInt(
+			"objectID",
+			static_cast<int>(i + 1));
+
+
+		object->model->draw(
+			transparentPickShader,
+			MeshPass::Transparent);
+	}
+
+	const GLenum geometryBuffers[] =
+	{
+		GL_COLOR_ATTACHMENT0,
+		GL_COLOR_ATTACHMENT1,
+		GL_COLOR_ATTACHMENT2,
+		GL_COLOR_ATTACHMENT3,
+		GL_COLOR_ATTACHMENT4,
+		GL_COLOR_ATTACHMENT5,
+		GL_COLOR_ATTACHMENT6
+	};
+
+	glDrawBuffers(7, geometryBuffers);
+
+	glDepthFunc(static_cast<GLenum>(previousDepthFunc));
+	glDepthMask(previousDepthMask);
+
+	if (previousDepthTest)
+		glEnable(GL_DEPTH_TEST);
+	else
+		glDisable(GL_DEPTH_TEST);
+
+	if (previousBlend)
+		glEnable(GL_BLEND);
+	else
+		glDisable(GL_BLEND);
+
+	glUseProgram(static_cast<GLuint>(previousProgram));
+	glActiveTexture(static_cast<GLenum>(previousActiveTexture));
+
+	glBindFramebuffer(
+		GL_DRAW_FRAMEBUFFER,
+		static_cast<GLuint>(previousDrawFBO));
+
+	glViewport(
+		previousViewport[0],
+		previousViewport[1],
+		previousViewport[2],
+		previousViewport[3]);
 }
 
 
@@ -1397,7 +1744,7 @@ void Renderer::renderBloomPass(Mesh& quad, int debugView)
 	glBindFramebuffer(GL_FRAMEBUFFER, bloomFBO);
 	glActiveTexture(GL_TEXTURE0);
 
-	unsigned int source = getPostTAAColorTexture(debugView);
+	unsigned int source = sceneColorTexture;
 
 	bloomDownsampleShader.use();
 	bloomDownsampleShader.setInt("sourceTexture", 0);
@@ -1514,7 +1861,7 @@ void Renderer::renderScreenPass(Mesh& quad, int toneMappingMode, int debugView)
 	glActiveTexture(GL_TEXTURE1);
 	glBindTexture(GL_TEXTURE_2D, bloomReady ? bloomMips.front().texture : 0);
 
-	unsigned int outputTexture = taaEnabled && taaHistoryValid && debugView == 0 ? taaHistoryColor[taaHistoryReadIndex] : sceneColorTexture;
+	unsigned int outputTexture = sceneColorTexture;
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, outputTexture);
 
@@ -1552,7 +1899,7 @@ void Renderer::resizeSceneFramebuffer(int width, int height)
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, framebufferWidth, framebufferHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 
 	glBindRenderbuffer(GL_RENDERBUFFER, sceneRBO);
-	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, framebufferWidth, framebufferHeight);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, framebufferWidth, framebufferHeight);
 
 	glBindTexture(GL_TEXTURE_2D, gNormal);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, framebufferWidth, framebufferHeight, 0, GL_RGB, GL_FLOAT, nullptr);
@@ -1765,17 +2112,35 @@ glm::mat4 Renderer::calculateCascadeLightMatrix(const glm::vec3& lightDirection,
 }
 
 
+void Renderer::setSSAOEnabled(bool enabled)
+{
+	if (ssaoEnabled == enabled)
+		return;
+
+	ssaoEnabled = enabled;
+	invalidateTAAHistory();
+}
+
 void Renderer::setTAAEnabled(bool enabled)
 {
 	if (taaEnabled == enabled)
 		return;
 
 	taaEnabled = enabled;
+	invalidateTAAHistory();
+}
+
+void Renderer::invalidateTAAHistory()
+{
 	taaFrameIndex = 0;
 	taaHistoryReadIndex = 0;
 	taaHistoryValid = false;
 	hasPreviousTAAFrame = false;
 	previousModelMatrices.clear();
+	taaStableFrames = 0;
+	hasTAASceneSignature = false;
+	taaJitterPixels = glm::vec2(0.0f);
+	previousTAAJitterPixels = glm::vec2(0.0f);
 }
 
 
@@ -1797,4 +2162,15 @@ void Renderer::destroyBloomFramebuffer()
 unsigned int Renderer::getPostTAAColorTexture(int debugView) const
 {
 	return taaEnabled && taaHistoryValid && (debugView == 0 || debugView == 10) ? taaHistoryColor[taaHistoryReadIndex] : sceneColorTexture;
+}
+
+
+void Renderer::copyOpaqueDepthToScene()
+{
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, gBuffer);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, sceneFBO);
+
+	glBlitFramebuffer(0, 0, framebufferWidth, framebufferHeight, 0, 0, framebufferWidth, framebufferHeight, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }

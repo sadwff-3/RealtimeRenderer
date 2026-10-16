@@ -36,8 +36,13 @@ public:
     void renderTAAPass(Mesh& quad, int debugView);
     void renderBloomPass(Mesh& quad, int debugView);
     void setTAAEnabled(bool enabled);
+    void setSSAOEnabled(bool enabled);
+    bool isSSAOEnabled() const { return ssaoEnabled; }
+    void invalidateTAAHistory();
     bool isTAAEnabled() const { return taaEnabled; };
     void destroyBloomFramebuffer();
+    void renderTransparentPass(const Scene& scene, Camera& camera, int debugView, unsigned int irradianceMap, unsigned int prefilterMap, unsigned int brdfLUT);
+    void renderTransparentPickingPass(const Scene& scene);
 
     struct BloomSettings
     {
@@ -70,6 +75,8 @@ private:
     Shader taaShader;
     Shader bloomDownsampleShader;
     Shader bloomUpsampleShader;
+    Shader transparentShader;
+    Shader transparentPickShader;
 
     unsigned int depthMapFBO = 0;
     unsigned int depthMap = 0;
@@ -124,6 +131,7 @@ private:
     unsigned int finalFBO = 0;
     unsigned int finalColorTexture = 0;
     bool taaEnabled = false;
+    bool ssaoEnabled = true;
     unsigned int taaFrameIndex = 0;
     
 
@@ -169,5 +177,6 @@ private:
     void initFinalFramebuffer();
     void initTAAFramebuffers();
     void initBloomFramebuffer();
+    void copyOpaqueDepthToScene();
     unsigned int getPostTAAColorTexture(int debugView) const;
 };

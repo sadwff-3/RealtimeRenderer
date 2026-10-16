@@ -248,8 +248,11 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene, const glm::mat4& tra
 }
 
 
-void Model::draw(Shader& shader) const
+void Model::draw(Shader& shader, MeshPass pass, std::optional<std::size_t> onlyMesh) const
 {
+	if (onlyMesh && *onlyMesh >= meshes.size())
+		return;
+
 	const GLboolean previousCull = glIsEnabled(GL_CULL_FACE);
 	GLint previousCullMode = GL_BACK;
 	glGetIntegerv(GL_CULL_FACE_MODE, &previousCullMode);
@@ -293,9 +296,17 @@ void Model::draw(Shader& shader) const
 	Texture* lastTextures[5] = {};
 	int lastDoubleSided = -1;
 
-	for (std::size_t i = 0; i < meshes.size(); ++i)
+	const std::size_t first = onlyMesh.value_or(0);
+	const std::size_t last = onlyMesh ? first + 1 : meshes.size();
+
+	for (std::size_t i = first; i < last; ++i)
 	{
 		const Material& material = meshMaterials[i];
+
+		const bool isTransparent = material.alphaMode == 2;
+		if (isTransparent != (pass == MeshPass::Transparent))
+			continue;
+
 		const int doubleSided = material.doubleSided ? 1 : 0;
 
 		if (lastDoubleSided != doubleSided)
@@ -377,6 +388,8 @@ void Model::drawShadow(Shader& shader) const
 			glActiveTexture(GL_TEXTURE0);
 			material.albedo->bind();
 		}
+		if (material.alphaMode == 2)
+			continue;
 		meshes[i].draw();
 	}
 }
@@ -438,6 +451,8 @@ void Model::drawShadowCulled(Shader& shader, const glm::mat4& localToShadowClip,
 			glActiveTexture(GL_TEXTURE0);
 			material.albedo->bind();
 		}
+		if (material.alphaMode == 2)
+			continue;
 
 		meshes[i].draw();
 	}
@@ -528,4 +543,11 @@ Material& Model::getMaterial(std::size_t index)
 const Material& Model::getMaterial(std::size_t index) const
 {
 	return meshMaterials[index];
+}
+
+
+glm::vec3 Model::getMeshLocalCenter(std::size_t index) const
+{
+	const Mesh& mesh = meshes.at(index);
+	return (mesh.getBoundsMin() + mesh.getBoundsMax()) * 0.5f;
 }

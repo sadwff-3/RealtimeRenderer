@@ -23,19 +23,9 @@ cmake_install.cmake
 Thumbs.db
 .DS_Store
 
-# Large third-party assets
-assets/sponza/
-assets/models/
-assets/commercial_refrigerator/
-assets/flight_helmet/
-assets/sponza_pbr/
+# Local editor layout
+imgui.ini
 
-# Assets
+# Third-party scene assets and dependency sources
 assets/
-
-# External libraries
 external/
-
-# Build
-out/
-.vs/
